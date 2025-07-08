@@ -1,0 +1,23 @@
+# Core API
+fastapi
+uvicorn[standard]
+pydantic
+
+# Vector Database Client
+# Using the official client for Milvus
+pymilvus==2.2.8
+
+# Configuration
+pyyaml
+
+# Shared Client (install in editable mode from project root)
+# pip install -e ./shared/q_vectorstore_client
+# This line is for reference; do not uncomment. 
+# The dependency is on a local package.
+# For now, we assume the path is added to PYTHONPATH.
+# -e ./shared/q_vectorstore_client
+
+# Utilities
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi 

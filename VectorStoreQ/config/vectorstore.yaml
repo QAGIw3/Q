@@ -1,0 +1,21 @@
+service_name: "VectorStoreQ"
+version: "0.1.0"
+
+# API Server Configuration
+api:
+  host: "0.0.0.0"
+  port: 8001
+
+# Milvus Connection Configuration
+milvus:
+  host: "localhost"
+  port: 19530
+  # For production, use a secure token
+  token: null 
+  # A connection alias is good practice
+  alias: "default" 
+
+# OpenTelemetry Configuration
+otel:
+  enabled: true
+  endpoint: "http://localhost:4317" 
