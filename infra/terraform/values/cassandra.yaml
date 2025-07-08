@@ -1,0 +1,12 @@
+replicaCount: 3
+resources:
+  requests:
+    cpu: "500m"
+    memory: "2Gi"
+  limits:
+    cpu: "1"
+    memory: "4Gi"
+
+persistence:
+  enabled: true
+  size: 10Gi 

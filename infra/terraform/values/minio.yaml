@@ -1,0 +1,9 @@
+mode: standalone
+replicas: 1
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    cpu: "500m"
+    memory: "1Gi" 

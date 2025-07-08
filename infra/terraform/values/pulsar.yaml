@@ -1,0 +1,18 @@
+broker:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+zookeeper:
+  replicaCount: 3
+
+bookkeeper:
+  replicaCount: 3
+
+proxy:
+  replicaCount: 1 

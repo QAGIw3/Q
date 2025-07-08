@@ -1,0 +1,17 @@
+cassandra:
+  enabled: false  # we deploy external Cassandra release
+elasticsearch:
+  enabled: false  # external Elasticsearch release
+
+env:
+  STORAGE_BACKEND: cassandra
+  STORAGE_HOSTS: janusgraph-cassandra  # service name from cassandra chart
+  INDEX_SEARCH_BACKEND: elasticsearch
+  INDEX_SEARCH_HOSTS: http://elasticsearch-master:9200
+resources:
+  requests:
+    cpu: "300m"
+    memory: "1Gi"
+  limits:
+    cpu: "600m"
+    memory: "2Gi" 

@@ -129,4 +129,34 @@ resource "helm_release" "minio" {
   values = [
     file("${path.module}/values/minio.yaml")
   ]
+}
+
+# ----------------------------
+# ArgoCD (argoproj)
+# ----------------------------
+resource "helm_release" "argocd" {
+  name       = "argocd"
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argo-cd"
+  version    = var.argocd_chart_version
+
+  namespace  = var.namespace
+  values = [
+    file("${path.module}/values/argocd.yaml")
+  ]
+}
+
+# ----------------------------
+# Harbor (goharbor)
+# ----------------------------
+resource "helm_release" "harbor" {
+  name       = "harbor"
+  repository = "https://helm.goharbor.io"
+  chart      = "harbor"
+  version    = var.harbor_chart_version
+
+  namespace  = var.namespace
+  values = [
+    file("${path.module}/values/harbor.yaml")
+  ]
 } 

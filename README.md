@@ -52,6 +52,28 @@ Deliver a distributed, highly-adaptive, and privacy-conscious AI ecosystem for r
 
 ---
 
+### **Core Platform Services**
+
+The core application components are supported by a set of robust, centralized services that provide essential capabilities for security, operations, and AI-native functionality.
+
+#### **1. AuthQ – Security & Identity Management**
+- **Role:** Centralized authentication and authorization for all users and services.
+- **Platform Contribution:** Establishes a zero-trust security model, managing identities, roles, and access policies to protect the entire platform.
+
+#### **2. ObservabilityStack – Metrics, Logging & Tracing**
+- **Role:** A unified stack for collecting, storing, and visualizing metrics, logs, and traces.
+- **Platform Contribution:** Provides deep, system-wide visibility, enabling debugging, performance tuning, and operational health monitoring for all components.
+
+#### **3. DevOpsPlatform – CI/CD & GitOps**
+- **Role:** Automates the build, test, and deployment lifecycle for all microservices.
+- **Platform Contribution:** Enables rapid and reliable software delivery, ensuring that new features and fixes can be deployed to production safely and efficiently.
+
+#### **4. VectorStoreQ – Centralized Vector Database**
+- **Role:** A managed, scalable vector database for storing and searching high-dimensional embeddings.
+- **Platform Contribution:** Powers the platform's core AI capabilities, including Retrieval-Augmented Generation (RAG) and semantic search, by providing a central repository for vectorized knowledge.
+
+---
+
 ### **Platform-Wide Architectural Principles**
 
 - **Modularity:** Each component (H2M, QuantumPulse, agentQ, managerQ) is independently deployable and extensible, running as microservices or plug-and-play modules.

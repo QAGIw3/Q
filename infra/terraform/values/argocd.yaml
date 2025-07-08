@@ -1,0 +1,26 @@
+# infra/terraform/values/argocd.yaml
+#
+# Minimal values for a local/dev ArgoCD setup.
+# Full values list: https://github.com/argoproj/argo-helm/blob/main/charts/argo-cd/values.yaml
+
+server:
+  # For local dev, we'll use a ClusterIP and port-forward.
+  # For production, you would configure Ingress.
+  service:
+    type: ClusterIP
+
+  # Disable TLS for local dev. Production should use TLS.
+  insecure: true
+
+# Use a smaller, non-HA Redis for local dev
+redis:
+  ha:
+    enabled: false
+
+# Disable HA for the repo server in local dev
+repoServer:
+  replicas: 1
+
+# Disable HA for the application controller in local dev
+controller:
+  replicas: 1 

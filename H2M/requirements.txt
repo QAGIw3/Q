@@ -1,0 +1,9 @@
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+openai==1.14.3
+anthropic==0.25.0
+apache-pulsar-client==3.5.0
+pyignite==0.5.0
+fastavro==1.9.4
+pydantic==2.6.4
+python-dotenv==1.0.1 
