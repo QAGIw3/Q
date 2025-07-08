@@ -1,0 +1,25 @@
+# .github/workflows/h2m-ci.yml
+name: CI - H2M
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'H2M/**'
+      - 'shared/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'H2M/**'
+      - 'shared/**'
+
+jobs:
+  build-and-push-image:
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      service_name: h2m-service
+      dockerfile_path: ./H2M/Dockerfile
+    secrets:
+      REGISTRY_USER: ${{ secrets.HARBOR_USER }}
+      REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      REGISTRY_URL: ${{ secrets.HARBOR_URL }} 

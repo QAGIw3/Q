@@ -1,5 +1,6 @@
 import logging
 from typing import Dict, List
+from jinja2 import Environment, FileSystemLoader
 
 from app.core.context import context_manager
 from app.core.rag import rag_module
@@ -11,6 +12,27 @@ from app.services.pulsar_client import h2m_pulsar_client
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# --- Prompt Templating Setup ---
+# A more robust approach would be to have a dedicated templates directory
+PROMPT_TEMPLATE = """
+System: You are a helpful and professional AI assistant. Answer the user's question based on the provided context. If the context is not relevant or does not contain the answer, say that you do not have enough information to answer. Do not make up information.
+
+{% if rag_context %}
+--- CONTEXT ---
+{{ rag_context }}
+--- END CONTEXT ---
+{% endif %}
+
+{% for message in history %}
+{{ message.role | title }}: {{ message.content }}
+{% endfor %}
+User: {{ user_query }}
+Assistant:
+"""
+jinja_env = Environment()
+prompt_template = jinja_env.from_string(PROMPT_TEMPLATE)
+
 
 class ConversationOrchestrator:
     """
@@ -77,31 +99,11 @@ class ConversationOrchestrator:
 
     def _build_prompt(self, user_query: str, history: List[Dict], rag_context: str) -> str:
         """
-        Builds the final prompt to be sent to the language model.
+        Builds the final prompt to be sent to the language model using Jinja2.
         """
-        # Simple prompt template
-        template = """
-You are a helpful AI assistant. Use the following context to answer the user's question.
-If the context is not relevant, ignore it and answer based on the conversation history.
-
---- CONTEXT ---
-{rag_context}
---- END CONTEXT ---
-
---- CONVERSATION HISTORY ---
-{history}
---- END CONVERSATION HISTORY ---
-
-User: {user_query}
-Assistant:
-"""
-        
-        # Format history for the prompt
-        formatted_history = "\n".join([f"{msg['role'].title()}: {msg['content']}" for msg in history])
-        
-        prompt = template.format(
-            rag_context=rag_context if rag_context else "No relevant context found.",
-            history=formatted_history if formatted_history else "This is a new conversation.",
+        prompt = prompt_template.render(
+            rag_context=rag_context,
+            history=history,
             user_query=user_query
         )
         logger.debug(f"Constructed final prompt:\n{prompt}")

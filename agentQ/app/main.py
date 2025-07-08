@@ -12,26 +12,44 @@ import fastavro
 import io
 import signal
 import uuid
+import json
 from opentelemetry import trace
 
 from shared.opentelemetry.tracing import setup_tracing
+from agentQ.app.core.context import ContextManager
+from agentQ.app.core.toolbox import Toolbox, Tool
+from agentQ.app.core.vectorstore_tool import vectorstore_tool
 
 # Initialize tracing
 SERVICE_NAME = "agentq-service"
-setup_tracing(SERVICE_NAME)
+setup_tracing(app=None) # Pass None as we are not in a FastAPI context
 tracer = trace.get_tracer(__name__)
 
 # --- Configuration & Logging ---
-logging.basicConfig(level="INFO")
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("agentq")
 running = True
 
-# --- Signal Handler & Schemas ---
-def shutdown(signum, frame):
-    global running
-    logger.info("Shutdown signal received. Stopping agent...")
-    running = False
+# --- System Prompt ---
+SYSTEM_PROMPT = """
+You are an autonomous AI agent. Your goal is to answer the user's question or fulfill their request.
 
+You operate in a ReAct (Reason, Act) loop. In each turn, you must use the following format:
+
+Thought: [Your reasoning about the current state and what to do next]
+Action: [A JSON object describing the action to take. Must be one of `finish` or `call_tool`]
+
+Example `Action` objects:
+- To provide a final answer: `{"action": "finish", "answer": "The final answer to the user."}`
+- To call a tool: `{"action": "call_tool", "tool_name": "tool_name", "parameters": {"arg1": "value1"}}`
+
+Here are the tools you have available:
+{tools}
+
+Begin!
+"""
+
+# --- Schemas & Config ---
 PROMPT_SCHEMA = fastavro.parse_schema({
     "namespace": "q.h2m", "type": "record", "name": "PromptMessage",
     "fields": [
@@ -66,46 +84,57 @@ def register_with_manager(producer, agent_id, task_topic):
     producer.send(buf.getvalue())
     logger.info("Registration message sent.")
 
-@tracer.start_as_current_span("process_agent_message")
-def process_message(msg, producer, client, llm_config):
-    """Processes a single message from the dedicated task topic."""
-    current_span = trace.get_current_span()
-    try:
-        bytes_reader = io.BytesIO(msg.data())
-        prompt_data = next(fastavro.reader(bytes_reader, PROMPT_SCHEMA), None)
-        if not prompt_data: return
+# --- ReAct Loop ---
+@tracer.start_as_current_span("react_loop")
+def react_loop(prompt_data, context_manager, toolbox, client, llm_config):
+    """The main ReAct loop for processing a user request."""
+    user_prompt = prompt_data.get("prompt")
+    conversation_id = prompt_data.get("id") # Assuming prompt_id is the conversation_id
 
-        prompt_id = prompt_data.get("id")
-        prompt_text = prompt_data.get("prompt")
-        logger.info(f"Received prompt [{prompt_id}]")
-        current_span.set_attribute("message.id", prompt_id)
+    history = context_manager.get_history(conversation_id)
+    history.append({"role": "user", "content": user_prompt})
 
-        # The OpenAI call is automatically traced by the RequestsInstrumentor
-        logger.info("Sending prompt to OpenAI...")
+    max_turns = 5
+    for turn in range(max_turns):
+        current_span = trace.get_current_span()
+        current_span.set_attribute("react.turn", turn)
+
+        # 1. Build the prompt
+        full_prompt = history + [{"role": "system", "content": SYSTEM_PROMPT.format(tools=toolbox.get_tool_descriptions())}]
+        
+        # 2. Call the LLM
         completion = client.chat.completions.create(
             model=llm_config['model'],
-            messages=[{"role": "user", "content": prompt_text}]
+            messages=full_prompt
         )
-        result_text = completion.choices[0].message.content
-        logger.info(f"Received result from OpenAI for prompt [{prompt_id}]")
+        response_text = completion.choices[0].message.content
+        history.append({"role": "assistant", "content": response_text})
 
-        with tracer.start_as_current_span("publish_result_to_pulsar") as span:
-            result_message = {
-                "id": prompt_id, "result": result_text, "llm_model": llm_config['model'],
-                "prompt": prompt_text, "timestamp": int(time.time() * 1000)
-            }
-            span.set_attribute("pulsar.topic", producer.topic())
-            span.set_attribute("message.id", prompt_id)
-            
-            buf = io.BytesIO()
-            fastavro.writer(buf, RESULT_SCHEMA, [result_message])
-            producer.send(buf.getvalue())
-            logger.info(f"Published result for prompt [{prompt_id}]")
+        # 3. Parse the response
+        try:
+            thought = response_text.split("Action:")[0].replace("Thought:", "").strip()
+            action_str = response_text.split("Action:")[1].strip()
+            action_json = json.loads(action_str)
+            current_span.add_event("LLM Response Parsed", {"thought": thought, "action": json.dumps(action_json)})
+        except (IndexError, json.JSONDecodeError) as e:
+            logger.error(f"Could not parse LLM response: {response_text}. Error: {e}")
+            return "Error: Could not parse my own action. I will try again."
 
-    except Exception as e:
-        logger.error(f"Failed to process message: {e}", exc_info=True)
-        current_span.record_exception(e)
-        current_span.set_status(trace.Status(trace.StatusCode.ERROR, "Agent message processing failed"))
+        # 4. Execute the action
+        if action_json.get("action") == "finish":
+            final_answer = action_json.get("answer", "No answer provided.")
+            context_manager.append_to_history(conversation_id, history)
+            return final_answer
+        elif action_json.get("action") == "call_tool":
+            tool_name = action_json.get("tool_name")
+            parameters = action_json.get("parameters", {})
+            observation = toolbox.execute_tool(tool_name, **parameters)
+            history.append({"role": "system", "content": f"Tool Observation: {observation}"})
+        else:
+            history.append({"role": "system", "content": "Error: Invalid action specified."})
+
+    context_manager.append_to_history(conversation_id, history)
+    return "Error: Reached maximum turns without a final answer."
 
 def run_agent():
     config = load_config()
@@ -116,10 +145,16 @@ def run_agent():
     task_topic = f"persistent://public/default/q.agentq.tasks.{agent_id}"
     subscription_name = f"agentq-sub-{agent_id}"
 
+    # Initialize components
+    context_manager = ContextManager(ignite_addresses=config['ignite']['addresses'], agent_id=agent_id)
+    toolbox = Toolbox()
+    toolbox.register_tool(vectorstore_tool)
+    
     pulsar_client = None
     try:
         pulsar_client = pulsar.Client(pulsar_config['service_url'])
         openai_client = OpenAI()
+        context_manager.connect()
 
         # Producer for registration
         reg_producer = pulsar_client.create_producer(pulsar_config['registration_topic'], schema=pulsar.schema.BytesSchema())
@@ -141,12 +176,27 @@ def run_agent():
             while running:
                 try:
                     msg = consumer.receive(timeout_millis=1000)
-                    process_message(msg, result_producer, openai_client, llm_config)
+                    bytes_reader = io.BytesIO(msg.data())
+                    prompt_data = next(fastavro.reader(bytes_reader, PROMPT_SCHEMA), None)
+                    if not prompt_data: continue
+
+                    final_result = react_loop(prompt_data, context_manager, toolbox, openai_client, llm_config)
+                    
+                    # Publish the final result
+                    result_message = {
+                        "id": prompt_data.get("id"), "result": final_result, 
+                        "llm_model": llm_config['model'], "prompt": prompt_data.get("prompt"),
+                        "timestamp": int(time.time() * 1000)
+                    }
+                    buf = io.BytesIO()
+                    fastavro.writer(buf, RESULT_SCHEMA, [result_message])
+                    result_producer.send(buf.getvalue())
+
                     consumer.acknowledge(msg)
                 except pulsar.Timeout:
                     continue
                 except Exception as e:
-                    logger.error(f"An error occurred in the main loop: {e}")
+                    logger.error(f"An error occurred in the main loop: {e}", exc_info=True)
                     if 'msg' in locals():
                         consumer.negative_acknowledge(msg)
                     time.sleep(5)
@@ -156,6 +206,7 @@ def run_agent():
     finally:
         if pulsar_client:
             pulsar_client.close()
+        context_manager.close()
         logger.info(f"Agent '{agent_id}' has shut down.")
 
 if __name__ == "__main__":

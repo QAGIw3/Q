@@ -2,18 +2,24 @@
 #
 # Configuration for the QuantumPulse Manager (managerQ)
 
+service_name: "ManagerQ"
+version: "0.1.0"
+
+# API Server Configuration
+api:
+  host: "0.0.0.0"
+  port: 8003
+
+# Pulsar Connection & Topic Configuration
 pulsar:
   service_url: "pulsar://localhost:6650"
-  
-  # Topic for receiving new prompts from H2M
-  prompts_intake_topic: "q.h2m.prompts.intake"
-  prompts_subscription: "managerq-prompts-subscription"
-  
-  # Topic for agents to register on startup
-  agent_registration_topic: "q.managerq.registration"
-  registration_subscription: "managerq-registration-subscription"
+  topics:
+    registration: "persistent://public/default/q.agentq.registrations"
+    results: "persistent://public/default/q.agentq.results"
+    # The task topic prefix is used to construct the full topic name for each agent
+    task_prefix: "persistent://public/default/q.agentq.tasks."
 
-ignite:
-  host: "localhost"
-  port: 10800
-  cache_name: "agent_registry" # Cache to store active agent topics
+# OpenTelemetry Configuration
+otel:
+  enabled: true
+  endpoint: "http://localhost:4317"

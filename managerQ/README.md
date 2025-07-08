@@ -1,115 +1,66 @@
-# QuantumPulse Collaborative Manager (QP-Manager)
+# 🧠 managerQ
 
 ## Overview
 
-QuantumPulse Collaborative Manager (QP-Manager) is the orchestration backbone for coordinating a swarm of distributed QP-Agents. Designed to facilitate real-time collaborative decision-making, federated instruction tuning, and emergent behavior discovery, QP-Manager enables resource-aware scaling and dynamic load balancing within a highly distributed AI ecosystem.
+`managerQ` is the control plane for the Q Platform's multi-agent system. It acts as a centralized dispatcher and coordinator, making the pool of autonomous `agentQ` workers a usable and scalable resource for the rest of the platform.
 
-## Key Responsibilities
+Its core responsibilities are:
+-   **Agent Discovery**: Maintaining a real-time registry of all active and available `agentQ` instances.
+-   **Task Dispatching**: Providing a single, unified API for other services to submit tasks to the agent pool.
+-   **Load Balancing**: Distributing incoming tasks across the available agents (currently using a simple random strategy).
+-   **Result Correlation**: Listening for results from agents and correlating them back to the original request.
 
-* **Swarm Coordination & Orchestration**: Manage and synchronize distributed QP-Agents across geographies.
-* **Federated Learning & Tuning**: Secure, privacy-preserving instruction tuning leveraging federated learning techniques.
-* **Real-Time Collaboration**: Orchestrate on-the-fly strategy optimization and decision-making.
-* **Emergent Behavior Discovery**: Identify, analyze, and disseminate newly discovered strategies and behaviors.
-* **Resource-Aware Management**: Dynamically scale agents based on compute and energy availability.
+## Architecture
 
-## Components
+`managerQ` is a FastAPI service that uses several background threads to manage its state and communicate over Pulsar.
 
-### 1. Swarm Intelligence Coordinator
+1.  **API Layer**: Exposes a single REST endpoint (`POST /v1/tasks`) for submitting a new task (e.g., a prompt for an agent).
+2.  **`AgentRegistry`**: A background thread consumes from the `q.agentq.registrations` topic. When an `agentQ` instance starts, it publishes a registration message. The registry adds it to an in-memory list of active agents.
+3.  **`TaskDispatcher`**: When a request comes into the API, the dispatcher gets an available agent from the registry and publishes the task message directly to that agent's unique task topic.
+4.  **`ResultListener`**: A second background thread consumes from the shared `q.agentq.results` topic. When it receives a result, it uses a `Future` to notify the original API request handler that the task is complete.
+5.  **Request/Reply Flow**: The API handler blocks until the `ResultListener` receives the corresponding result or a timeout occurs, then returns the final answer to the client.
 
-* Pulsar-based topic communication channels
-* Real-time agent collaboration management
+---
 
-### 2. Federated Learning Module
+## 🚀 Getting Started
 
-* Secure distributed tuning of agent instruction sets
-* Skill and instruction optimization across the swarm
+### 1. Prerequisites
 
-### 3. Resource Scheduling Manager
+-   An running Apache Pulsar cluster.
+-   At least one running `agentQ` instance.
 
-* Adaptive load balancing and scaling of QP-Agents
-* Energy-aware task allocation
+### 2. Installation & Configuration
 
-### 4. Emergent Behavior Analyzer
+1.  **Install Dependencies**: From the project root, install the required packages.
 
-* Detection and analysis of novel emergent strategies
-* Continuous distribution of learned behaviors back into the swarm
+    ```bash
+    pip install -r managerQ/requirements.txt
+    ```
 
-## Technical Stack
+2.  **Configure the Manager**: The service is configured via `managerQ/config/manager.yaml`. Ensure the Pulsar service URL and topic names are correct.
 
-| Component                      | Technology           |
-| ------------------------------ | -------------------- |
-| Messaging & Geo-Replication    | Apache Pulsar        |
-| Event-Driven Analytics         | Apache Flink         |
-| Container Orchestration        | Kubernetes           |
-| Vector Storage & Skill Sharing | Milvus (or similar)  |
-| Observability & Metrics        | Prometheus / Grafana |
+### 3. Running the Service
 
-## Use Cases
+The service can be run directly via Uvicorn for development.
 
-* **Multi-Agent Problem Solving**: Complex financial modeling, logistics optimization.
-* **Decentralized Autonomous Organizations (DAOs)**: Governance and decision workflows.
-* **Crisis Management**: Coordinated disaster response and resource allocation.
-* **Distributed AI Workforce**: Large-scale AI task delegation and management.
+```bash
+# From the project root
+export PYTHONPATH=$(pwd)
 
-## Installation & Deployment
+# Run the server
+uvicorn managerQ.app.main:app --reload
+```
 
-1. **Cluster Setup**
+The API documentation will be available at `http://127.0.0.1:8003/docs`.
 
-   * Provision a Kubernetes cluster (e.g., via `kubeadm`, managed cloud service).
-   * Ensure Apache Pulsar and Flink clusters are deployed (Helm charts recommended).
+### 4. Submitting a Task
 
-2. **Environment Variables**
+You can submit a task to an agent via the `/v1/tasks` endpoint:
 
-   ```bash
-   export PULSAR_SERVICE_URL=pulsar://<pulsar-broker>:6650
-   export FLINK_JOB_MANAGER_URL=http://<flink-jobmanager>:8081
-   export MILVUS_HOST=<milvus-host>
-   ```
-
-3. **Deploy QP-Manager**
-
-   ```bash
-   kubectl apply -f k8s/qp-manager-deployment.yaml
-   kubectl apply -f k8s/qp-manager-service.yaml
-   ```
-
-4. **Monitoring**
-
-   * Access Grafana dashboard at `http://<grafana-host>:3000`.
-   * Query Prometheus metrics under `qp_manager_*` namespace.
-
-## Usage
-
-* **Swarm Initialization**: Trigger the initial agent registration via the QP-Manager API endpoint:
-
-  ```bash
-  curl -X POST http://<qp-manager>:8080/api/v1/swarm/register -d '{ "agentId": "agent-001" }'
-  ```
-
-* **Tuning Round**: Start a federated learning round:
-
-  ```bash
-  curl -X POST http://<qp-manager>:8080/api/v1/tuning/start
-  ```
-
-* **Behavior Analysis**: Fetch emergent behavior reports:
-
-  ```bash
-  curl http://<qp-manager>:8080/api/v1/behaviors/latest
-  ```
-
-## Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature/<your-feature>`).
-3. Commit your changes (`git commit -m "Add feature ..."`).
-4. Push to the branch (`git push origin feature/<your-feature>`).
-5. Open a Pull Request.
-
-Please ensure your code follows the project's style guidelines and includes relevant tests.
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
+```bash
+curl -X POST "http://localhost:8003/v1/tasks" \
+-H "Content-Type: application/json" \
+-d '{
+  "prompt": "What is the capital of France, and what is its population?"
+}'
+```

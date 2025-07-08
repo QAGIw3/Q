@@ -1,112 +1,61 @@
 # 🧠 QuantumPulse
 
-A next‑generation service for distributed LLM inference pipelines, built on Apache Pulsar. QuantumPulse enables real‑time prompt preprocessing, dynamic model routing, streaming updates, and much more — all at scale.
+QuantumPulse is the next-generation service for distributed LLM inference pipelines. It is designed to be a highly scalable, message-driven system that can preprocess, route, and execute inference requests efficiently.
 
----
-
-## Architecture Overview
+## Architecture
 
 QuantumPulse is built around a decoupled, message-driven architecture using Apache Pulsar as its backbone.
 
-1.  **API Gateway**: A FastAPI application receives inference requests via a REST API. It validates the request and publishes it to a Pulsar topic.
+1.  **API Gateway**: A FastAPI application receives inference requests and publishes them to an initial Pulsar topic.
 2.  **Stream Processing (Apache Flink)**:
-    *   **Prompt Optimizer**: A Flink job consumes raw requests, performs preprocessing (cleaning, tokenizing), and publishes them to a new topic.
-    *   **Dynamic Router**: A second Flink job consumes preprocessed requests and routes them to the appropriate model shard topic based on the request content and system load.
-3.  **Inference Workers**: These are Python services that subscribe to one or more model shard topics. They load the specified model, perform inference, and publish the result to a results topic. They are designed to be scaled horizontally.
-4.  **Results Handler**: A final service consumes the inference results and delivers them back to the original client (e.g., via WebSocket or webhook).
-
-This decoupled design allows each component to be developed, deployed, and scaled independently.
+    *   **Prompt Optimizer**: A PyFlink job consumes raw requests, performs preprocessing (e.g., cleaning, tokenizing), and publishes them to a `preprocessed-requests` topic.
+    *   **Dynamic Router**: A second PyFlink job consumes preprocessed requests and routes them to a model-and-shard-specific topic based on the request content (e.g., routing code-related questions to a specialized model).
+3.  **Inference Workers**: Python services that subscribe to one or more model shard topics. They load the specified model, perform inference, and publish the result to a reply topic specified in the original request.
+4.  **Real-time Reply-To Pattern**: The system uses temporary, exclusive reply topics to send the final inference result directly back to the original requester (e.g., the `H2M` service).
 
 ---
 
 ## 🚀 Getting Started
 
-### Prerequisites
+### 1. Dependencies
 
-*   Python 3.9+
-*   An running Apache Pulsar cluster.
-*   (Optional) An running Apache Flink cluster for stream processing.
-*   (Optional) Docker for containerized deployment.
+-   An running Apache Pulsar cluster.
+-   An running Apache Flink cluster.
+-   Docker (for containerized deployment).
 
-### 1. Installation
+### 2. Running the Flink Jobs
 
-Clone the repository and install the required dependencies. It is recommended to use a virtual environment.
-
-```bash
-# Create and activate a virtual environment
-python -m venv venv
-source venv/bin/activate
-
-# Install production and development dependencies
-pip install -r requirements-dev.txt
-```
-
-### 2. Configuration
-
-The main configuration is in `config/quantumpulse.yaml`. Before running the services, ensure the Pulsar service URL and other settings are correct for your environment.
-
-```yaml
-pulsar:
-  service_url: "pulsar://localhost:6650"
-  # ... other settings
-```
-
-### 3. Running the API Server
-
-The API server is the main entry point for inference requests.
+The stream processing jobs must be submitted to your Flink cluster. The `QuantumPulse/app/stream_processors/` directory contains scripts to do this.
 
 ```bash
-# This will start the FastAPI server with auto-reload
-python app/main.py
+# From the project root
+export PYTHONPATH=$(pwd)
+
+# Submit the Prompt Optimizer job
+python QuantumPulse/app/stream_processors/prompt_optimizer.py
+
+# Submit the Dynamic Router job
+python QuantumPulse/app/stream_processors/router.py
 ```
 
-You can access the API documentation at `http://127.0.0.1:8000/docs`.
+### 3. Running the Service with Docker Compose
 
-### 4. Running an Inference Worker
-
-The workers are responsible for running the ML models. You can run multiple workers for different models and shards.
+The easiest way to run the API server and the workers is with the provided `docker-compose.yml` file.
 
 ```bash
-# Run a worker for 'model-a', handling 'shard-1'
-python app/workers/specific_model_worker.py --model-name model-a --shard-id shard-1
+# From the QuantumPulse directory
+cd QuantumPulse
 
-# In a separate terminal, run a worker for another shard
-python app/workers/specific_model_worker.py --model-name model-a --shard-id shard-2
-```
-
-### 5. Running Tests
-
-The project uses `pytest` for testing.
-
-```bash
-pytest
-```
-
----
-
-## 🐳 Running with Docker Compose (Recommended)
-
-The easiest way to run the service locally is with Docker Compose. This will start the API server and two workers.
-
-**Prerequisite**: Ensure Docker is running.
-
-```bash
-# Start all services in detached mode
+# Start all services
 docker-compose up --build -d
 
-# View logs for all services
+# View logs
 docker-compose logs -f
 
-# Stop and remove all containers
+# Stop services
 docker-compose down
 ```
 
-The API will be available at `http://127.0.0.1:8000/docs`, and it will be able to communicate with the workers. This setup assumes you have a Pulsar instance running on `localhost:6650`.
+### 4. CI/CD
 
-## Manual Docker Deployment
-
-If you prefer to manage containers individually, Dockerfiles are provided.
-
-1.  **Build the Images**
-
-    ```
+A GitHub Actions workflow is configured in `.github/workflows/quantumpulse-ci.yml`. It automatically builds and publishes the `quantumpulse-api` and `quantumpulse-worker` images to the Harbor registry on every push to `main`.

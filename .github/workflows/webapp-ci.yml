@@ -1,0 +1,23 @@
+# .github/workflows/webapp-ci.yml
+name: CI - WebAppQ
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'WebAppQ/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'WebAppQ/**'
+
+jobs:
+  build-and-push-image:
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      service_name: webapp-q
+      dockerfile_path: ./WebAppQ/Dockerfile
+    secrets:
+      REGISTRY_USER: ${{ secrets.HARBOR_USER }}
+      REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      REGISTRY_URL: ${{ secrets.HARBOR_URL }} 

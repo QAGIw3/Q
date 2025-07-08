@@ -14,3 +14,7 @@ pulsar:
 llm:
   provider: "openai"
   model: "gpt-3.5-turbo"
+
+ignite:
+  addresses:
+    - "127.0.0.1:10800"

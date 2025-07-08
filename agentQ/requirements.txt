@@ -4,9 +4,14 @@ openai==1.14.3
 fastavro==1.9.4
 python-dotenv==1.0.1
 PyYAML==6.0.1
+pyignite==0.5.0
+httpx
 
 # OpenTelemetry
 opentelemetry-api==1.24.0
 opentelemetry-sdk==1.24.0
 opentelemetry-exporter-otlp-proto-grpc==1.24.0
 opentelemetry-instrumentation-requests==0.45b0
+
+# Shared Libraries (install in editable mode)
+# -e ./shared/q_vectorstore_client

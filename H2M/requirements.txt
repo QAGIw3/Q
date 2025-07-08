@@ -16,6 +16,13 @@ pyyaml
 # Service Clients
 httpx
 
+# Embeddings
+sentence-transformers
+torch
+
+# Prompt Templating
+Jinja2
+
 # Utilities
 opentelemetry-api
 opentelemetry-sdk

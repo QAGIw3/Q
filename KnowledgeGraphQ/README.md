@@ -1,37 +1,55 @@
-# Knowledge Graph & Semantic Search Service
+# 🧠 KnowledgeGraphQ
 
 ## Overview
 
-The Knowledge Graph & Semantic Search Service provides a centralized, continuously updated knowledge graph that integrates both structured and unstructured data sources from across your organization. It exposes powerful semantic search APIs for agents, LLMs, and downstream applications, enabling context-rich, intelligent retrieval and reasoning.
+The `KnowledgeGraphQ` service is responsible for batch processing and data ingestion pipelines that populate the Q Platform's core data services. Its primary role is to feed the `VectorStoreQ` with the high-quality embeddings needed for Retrieval-Augmented Generation (RAG).
 
-## Key Features
+While the name implies a future capability of building a formal knowledge graph, its current, implemented functionality is focused on the **vector database ingestion pipeline**.
 
-- **Unified Knowledge Graph:** Seamlessly integrates databases, documents, APIs, ontologies, and real-time streams.
-- **Continuous Ingestion:** Automated pipelines keep the graph up-to-date with new and changing data.
-- **Entity & Relationship Extraction:** NLP pipelines extract and maintain rich semantic links from text and structured records.
-- **Semantic Search APIs:** Expose REST/GraphQL endpoints for concept-based, fuzzy, and contextual queries.
-- **Access Control & Auditing:** Fine-grained permissions and full query/audit logging.
-- **Customizable Ontologies:** Supports domain-specific schema extension and entity types.
-- **Integration-Ready:** Designed to power LLM-based agents, question answering, recommendation, and analytics.
+---
 
-## Example Use Cases
+## Data Ingestion Pipeline
 
-- AgentQ context enrichment and reasoning
-- Organizational Q&A and expert finding
-- Real-time compliance and risk analysis
-- Recommendation and personalization engines
+The core of this service is the `scripts/ingest_docs.py` script. It performs the following steps:
 
-## Quick Start
+1.  **Create Collection**: It first communicates with the `VectorStoreQ` API to programmatically create the necessary collection (`rag_document_chunks`) and configure its schema and vector index.
+2.  **Load Documents**: It scans the `KnowledgeGraphQ/data/` directory for text-based documents (e.g., `.md`, `.txt`).
+3.  **Chunk Documents**: It uses the `langchain` library to split the documents into smaller, overlapping chunks suitable for embedding.
+4.  **Generate Embeddings**: It uses a `sentence-transformers` model to convert each text chunk into a vector embedding.
+5.  **Ingest Data**: Finally, it uses the `q_vectorstore_client` to batch-upload the chunks, their embeddings, and associated metadata to `VectorStoreQ`.
 
-1. **Install dependencies** and configure your data connectors.
-2. **Start the ingestion pipeline** with your data sources.
-3. **Launch the Knowledge Graph service.**
-4. **Query via REST/GraphQL** for entities, relationships, and semantic matches.
+---
 
-## API Documentation
+## 🚀 Getting Started
 
-See `/docs` for full API reference and example queries.
+### 1. Prerequisites
 
-## Contributing
+-   A running instance of `VectorStoreQ`.
+-   Python 3.9+ with dependencies installed.
 
-We welcome PRs for new connectors, ontologies, and search capabilities. Please see `CONTRIBUTING.md` for guidelines.
+### 2. Installation
+
+Install the necessary dependencies from the project root. It is recommended to use a virtual environment.
+
+```bash
+# Install dependencies
+pip install -r KnowledgeGraphQ/requirements.txt
+
+# Install the shared client library
+pip install -e ./shared/q_vectorstore_client
+```
+
+### 3. Add Data
+
+Place the markdown or text files you want to ingest into the `KnowledgeGraphQ/data/` directory. Two example files are already present.
+
+### 4. Run the Ingestion Script
+
+Execute the script from the **root directory of the Q project** to ensure correct path resolution.
+
+```bash
+export PYTHONPATH=$(pwd)
+python KnowledgeGraphQ/scripts/ingest_docs.py
+```
+
+The script will log its progress as it creates the collection, chunks the documents, generates embeddings, and ingests the data into the vector store.

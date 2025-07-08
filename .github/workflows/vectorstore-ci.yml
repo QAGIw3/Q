@@ -1,0 +1,25 @@
+# .github/workflows/vectorstore-ci.yml
+name: CI - VectorStoreQ
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'VectorStoreQ/**'
+      - 'shared/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'VectorStoreQ/**'
+      - 'shared/**'
+
+jobs:
+  build-and-push-image:
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      service_name: vectorstore-q
+      dockerfile_path: ./VectorStoreQ/Dockerfile
+    secrets:
+      REGISTRY_USER: ${{ secrets.HARBOR_USER }}
+      REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      REGISTRY_URL: ${{ secrets.HARBOR_URL }} 

@@ -1,0 +1,35 @@
+# .github/workflows/quantumpulse-ci.yml
+name: CI - QuantumPulse
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'QuantumPulse/**'
+      - 'shared/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'QuantumPulse/**'
+      - 'shared/**'
+
+jobs:
+  build-and-push-api-image:
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      service_name: quantumpulse-api
+      dockerfile_path: ./QuantumPulse/Dockerfile.api
+    secrets:
+      REGISTRY_USER: ${{ secrets.HARBOR_USER }}
+      REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      REGISTRY_URL: ${{ secrets.HARBOR_URL }}
+
+  build-and-push-worker-image:
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      service_name: quantumpulse-worker
+      dockerfile_path: ./QuantumPulse/Dockerfile.worker
+    secrets:
+      REGISTRY_USER: ${{ secrets.HARBOR_USER }}
+      REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      REGISTRY_URL: ${{ secrets.HARBOR_URL }} 
