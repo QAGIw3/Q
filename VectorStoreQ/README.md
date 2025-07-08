@@ -93,12 +93,13 @@ A `Dockerfile` is provided to containerize the service.
 
 ## API Endpoints
 
-The service provides the following versioned API endpoints.
+The service provides the following versioned API endpoints. All endpoints require a valid JWT from an authenticated user, passed via the Istio gateway.
 
 ### Ingestion
 
 *   `POST /v1/ingest/upsert`
     *   **Purpose**: Inserts or updates a batch of vectors in a specified collection.
+    *   **Authorization**: Requires a role of `admin` or `service-account`.
     *   **Request Body**: `UpsertRequest` (see `q_vectorstore_client/models.py`)
     *   **Response**: A confirmation with the number of inserted records and their primary keys.
 
@@ -106,5 +107,6 @@ The service provides the following versioned API endpoints.
 
 *   `POST /v1/search`
     *   **Purpose**: Performs a batch similarity search across one or more query vectors.
+    *   **Authorization**: Requires any authenticated user role.
     *   **Request Body**: `SearchRequest` (see `q_vectorstore_client/models.py`)
     *   **Response**: `SearchResponse`, containing a list of hits for each query. 

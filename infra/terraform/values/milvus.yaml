@@ -1,0 +1,31 @@
+# Milvus Helm Chart Values for a standalone deployment
+# Full list of values: https://github.com/milvus-io/milvus-helm/blob/master/charts/milvus/values.yaml
+
+# Use the standalone mode for a simpler, lightweight deployment suitable for development.
+cluster:
+  enabled: false
+
+standalone:
+  enabled: true
+  
+  # Configure persistence for the standalone instance
+  persistence:
+    enabled: true
+    # The size of the PVC for Milvus data
+    size: 20Gi
+
+# Disable bundled dependencies that we manage separately or don't need for standalone.
+etcd:
+  enabled: false
+minio:
+  enabled: false
+pulsar:
+  enabled: false
+kafka:
+  enabled: false
+  
+# Expose the Milvus service via a LoadBalancer for easy access from other services
+service:
+  type: LoadBalancer
+  # The default port for the Milvus service
+  port: 19530 

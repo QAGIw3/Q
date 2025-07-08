@@ -36,9 +36,9 @@ Services within the mesh **should not** validate JWTs themselves. They should tr
 pip install -e ./shared/q_auth_parser
 ```
 
-### Usage in FastAPI
+### Usage in a REST API (HTTP Headers)
 
-Use the `get_user_claims` dependency in your API endpoints. It will automatically handle header extraction, decoding, and validation.
+Use the `get_user_claims` dependency in your standard API endpoints.
 
 ```python
 from fastapi import APIRouter, Depends
@@ -61,6 +61,38 @@ async def get_my_data(claims: UserClaims = Depends(get_user_claims)):
         
     return {"message": f"Hello User {user_email}!"}
 ```
+
+### Usage in a WebSocket API (Query Parameters)
+
+For WebSockets, the authentication information must be passed during the initial handshake. Use the `get_user_claims_ws` dependency, which reads the claims from a query parameter.
+
+```python
+from fastapi import APIRouter, Depends
+from q_auth_parser.parser import get_user_claims_ws
+from q_auth_parser.models import UserClaims
+from fastapi import WebSocket
+
+router = APIRouter()
+
+@router.websocket("/ws/my-protected-socket")
+async def my_socket(
+    websocket: WebSocket,
+    claims: UserClaims = Depends(get_user_claims_ws)
+):
+    await websocket.accept()
+    # You now have the user's identity via the 'claims' object
+    user_id = claims.sub
+    user_email = claims.email
+    
+    if "admin" in claims.realm_access.roles:
+        # Perform admin-only logic
+        await websocket.send_text(f"Hello Admin {user_email}!")
+    else:
+        await websocket.send_text(f"Hello User {user_email}!")
+```
+
+A client would connect with a URL like:
+`ws://<host>/ws/my-protected-socket?claims=<base64-encoded-claims>`
 
 ---
 

@@ -1,141 +1,137 @@
 # KnowledgeGraphQ/scripts/ingest_docs.py
 
 import os
+import httpx
+import asyncio
 import logging
-from pymilvus import connections, utility, FieldSchema, CollectionSchema, DataType, Collection
+from langchain.document_loaders import DirectoryLoader, TextLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
-from tqdm import tqdm
+import uuid
+
+# This assumes the script is run from the root of the Q project
+# and shared is in the PYTHONPATH
+from shared.q_vectorstore_client.client import VectorStoreClient
+from shared.q_vectorstore_client.models import Vector
 
 # --- Configuration ---
-LOG_LEVEL = "INFO"
-MILVUS_ALIAS = "default"
-MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
-MILVUS_PORT = os.getenv("MILVUS_PORT", "19530")
-
-# Collection details
-COLLECTION_NAME = "knowledge_base"
-ID_FIELD = "id"
-DOC_SOURCE_FIELD = "doc_source"
-TEXT_FIELD = "text"
-VECTOR_FIELD = "vector"
-
-# Text processing
-CHUNK_SIZE = 512  # The size of text chunks in characters
-CHUNK_OVERLAP = 64
-
-# Embedding model
-MODEL_NAME = "all-MiniLM-L6-v2" # A good default model
-
-# --- Logging ---
-logging.basicConfig(level=LOG_LEVEL)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- Main Script ---
+VECTORSTORE_URL = "http://localhost:8001"
+DATA_DIR = "KnowledgeGraphQ/data"
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+COLLECTION_NAME = "rag_document_chunks"
+VECTOR_DIMENSION = 384 # Based on all-MiniLM-L6-v2
 
-def connect_to_milvus():
-    """Establish a connection to the Milvus server."""
+# --- Schema Definition ---
+RAG_COLLECTION_SCHEMA = {
+    "schema": {
+        "collection_name": COLLECTION_NAME,
+        "description": "Chunks of documents for Retrieval-Augmented Generation.",
+        "fields": [
+            {"name": "chunk_id", "dtype": "VarChar", "is_primary": True, "max_length": 36},
+            {"name": "document_id", "dtype": "VarChar", "max_length": 255},
+            {"name": "source_name", "dtype": "VarChar", "max_length": 255},
+            {"name": "text_chunk", "dtype": "VarChar", "max_length": 2000}, # Adjust size as needed
+            {"name": "embedding", "dtype": "FloatVector", "dim": VECTOR_DIMENSION},
+        ],
+    },
+    "index": {
+        "field_name": "embedding",
+        "index_type": "HNSW",
+        "metric_type": "COSINE",
+    }
+}
+
+async def create_collection_if_not_exists():
+    """Calls the VectorStoreQ API to create the collection."""
+    logger.info(f"Attempting to create collection '{COLLECTION_NAME}'...")
     try:
-        connections.connect(MILVUS_ALIAS, host=MILVUS_HOST, port=MILVUS_PORT)
-        logger.info(f"Successfully connected to Milvus at {MILVUS_HOST}:{MILVUS_PORT}")
-    except Exception as e:
-        logger.error(f"Failed to connect to Milvus: {e}")
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{VECTORSTORE_URL}/v1/manage/create-collection",
+                json=RAG_COLLECTION_SCHEMA,
+                timeout=30.0
+            )
+            response.raise_for_status()
+            logger.info(f"Create collection response: {response.json()}")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404: # Not found, which is unexpected here
+             logger.error("Management endpoint not found. Is VectorStoreQ running?")
+        else:
+            logger.error(f"Error creating collection: {e.response.status_code} - {e.response.text}")
+        raise
+    except httpx.RequestError as e:
+        logger.error(f"Could not connect to VectorStoreQ at {VECTORSTORE_URL}. Please ensure it is running.")
         raise
 
-def create_collection_if_not_exists(model) -> Collection:
-    """Create a Milvus collection if it doesn't already exist."""
-    if utility.has_collection(COLLECTION_NAME):
-        logger.info(f"Collection '{COLLECTION_NAME}' already exists.")
-        return Collection(COLLECTION_NAME)
+def load_and_chunk_documents():
+    """Loads documents from the data directory and splits them into chunks."""
+    logger.info(f"Loading documents from '{DATA_DIR}'...")
+    loader = DirectoryLoader(DATA_DIR, glob="**/*.md", loader_cls=TextLoader)
+    documents = loader.load()
 
-    logger.info(f"Collection '{COLLECTION_NAME}' does not exist. Creating...")
-    # Define fields
-    # We use a varchar for the primary key to store a meaningful ID
-    id_field = FieldSchema(name=ID_FIELD, dtype=DataType.VARCHAR, is_primary=True, max_length=1024)
-    doc_source_field = FieldSchema(name=DOC_SOURCE_FIELD, dtype=DataType.VARCHAR, max_length=1024)
-    text_field = FieldSchema(name=TEXT_FIELD, dtype=DataType.VARCHAR, max_length=65535) # Max length for VARCHAR
-    vector_field = FieldSchema(name=VECTOR_FIELD, dtype=DataType.FLOAT_VECTOR, dim=model.get_sentence_embedding_dimension())
-
-    schema = CollectionSchema(
-        fields=[id_field, doc_source_field, text_field, vector_field],
-        description="Knowledge Base for Q Platform",
-        enable_dynamic_field=False
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50,
+        length_function=len,
     )
-    collection = Collection(name=COLLECTION_NAME, schema=schema)
-    
-    # Create an index for the vector field
-    index_params = {
-        "metric_type": "L2",
-        "index_type": "IVF_FLAT",
-        "params": {"nlist": 128},
-    }
-    collection.create_index(VECTOR_FIELD, index_params)
-    logger.info(f"Successfully created collection '{COLLECTION_NAME}' and index.")
-    return collection
+    chunks = text_splitter.split_documents(documents)
+    logger.info(f"Loaded and split {len(documents)} documents into {len(chunks)} chunks.")
+    return chunks
 
-def chunk_text(text, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
-    """Splits text into overlapping chunks."""
-    start = 0
-    while start < len(text):
-        end = start + size
-        yield text[start:end]
-        start += size - overlap
+def generate_embeddings(chunks, model):
+    """Generates vector embeddings for document chunks."""
+    logger.info("Generating embeddings for all chunks...")
+    sentences = [chunk.page_content for chunk in chunks]
+    embeddings = model.encode(sentences, show_progress_bar=True)
+    logger.info("Embedding generation complete.")
+    return embeddings
 
-def ingest_data():
-    """Main function to run the data ingestion process."""
+async def ingest_data():
+    """The main ingestion pipeline."""
+    # 1. Ensure the collection exists
+    await create_collection_if_not_exists()
+
+    # 2. Load and chunk documents
+    chunks = load_and_chunk_documents()
+    if not chunks:
+        logger.info("No documents to ingest.")
+        return
+
+    # 3. Initialize models
+    logger.info(f"Loading sentence transformer model: {EMBEDDING_MODEL}")
+    embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+    vs_client = VectorStoreClient(base_url=VECTORSTORE_URL)
+
+    # 4. Generate embeddings
+    embeddings = generate_embeddings(chunks, embedding_model)
+
+    # 5. Prepare and upsert data in batches
+    vectors_to_upsert = []
+    for i, chunk in enumerate(chunks):
+        vector = Vector(
+            id=str(uuid.uuid4()),
+            values=embeddings[i].tolist(),
+            metadata={
+                "chunk_id": str(i), # Simple chunk ID
+                "document_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, chunk.metadata['source'])),
+                "source_name": os.path.basename(chunk.metadata['source']),
+                "text_chunk": chunk.page_content
+            }
+        )
+        vectors_to_upsert.append(vector)
+
+    logger.info(f"Upserting {len(vectors_to_upsert)} vectors to VectorStoreQ...")
     try:
-        connect_to_milvus()
-        
-        logger.info(f"Loading sentence transformer model: '{MODEL_NAME}'")
-        model = SentenceTransformer(MODEL_NAME)
-        
-        collection = create_collection_if_not_exists(model)
-        
-        data_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
-        if not os.path.exists(data_dir):
-            logger.error(f"Data directory not found at: {data_dir}")
-            return
-            
-        files_to_ingest = [f for f in os.listdir(data_dir) if f.endswith((".md", ".txt"))]
-        
-        logger.info(f"Found {len(files_to_ingest)} files to ingest from '{data_dir}'")
-        
-        total_chunks = 0
-        for filename in tqdm(files_to_ingest, desc="Ingesting files"):
-            filepath = os.path.join(data_dir, filename)
-            with open(filepath, 'r') as f:
-                content = f.read()
-
-            chunks = list(chunk_text(content))
-            embeddings = model.encode(chunks)
-            
-            entities = []
-            for i, (chunk, vector) in enumerate(zip(chunks, embeddings)):
-                # Create a unique, deterministic ID for each chunk
-                pk = f"{filename}-{i}"
-                entities.append({
-                    ID_FIELD: pk,
-                    DOC_SOURCE_FIELD: filename,
-                    TEXT_FIELD: chunk,
-                    VECTOR_FIELD: vector
-                })
-            
-            # Insert data
-            collection.insert(entities)
-            total_chunks += len(entities)
-            
-        # Flush to make data searchable
-        collection.flush()
-        logger.info("Flushed data to Milvus.")
-        
-        logger.info(f"Successfully ingested {total_chunks} chunks from {len(files_to_ingest)} files.")
-        logger.info(f"Collection '{COLLECTION_NAME}' now contains {collection.num_entities} entities.")
-
+        await vs_client.upsert(collection_name=COLLECTION_NAME, vectors=vectors_to_upsert)
+        logger.info("Ingestion process completed successfully.")
     except Exception as e:
-        logger.error(f"An error occurred during ingestion: {e}")
+        logger.error(f"Failed to upsert data: {e}", exc_info=True)
     finally:
-        if connections.has_connection(MILVUS_ALIAS):
-            connections.disconnect(MILVUS_ALIAS)
-            logger.info("Disconnected from Milvus.")
+        await vs_client.close()
+
 
 if __name__ == "__main__":
-    ingest_data() 
+    asyncio.run(ingest_data()) 

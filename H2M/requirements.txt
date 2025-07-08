@@ -7,6 +7,9 @@ websockets
 # In-Memory Data Grid for Conversation History
 pyignite
 
+# Messaging
+pulsar-client
+
 # Configuration
 pyyaml
 

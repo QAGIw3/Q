@@ -1,56 +1,70 @@
-# Q Platform – Infrastructure Provisioning
+# Q Platform - Infrastructure as Code (IaC)
 
-This Terraform module deploys the core data & messaging backbone required by the Q Platform to a Kubernetes cluster.
+This directory contains the Terraform configuration for deploying the entire Q Platform's core infrastructure services to a Kubernetes cluster.
 
-## What Gets Deployed
+## Deployed Services
 
-| Service          | Purpose                              | Helm Chart Source                       |
-| ---------------- | ------------------------------------ | --------------------------------------- |
-| Apache Pulsar    | Streaming / messaging backbone       | `pulsar.apache.org/charts`              |
-| Apache Cassandra | Wide-column store for time-series    | `bitnami/cassandra`                     |
-| Elasticsearch    | Full-text & analytics index          | `elastic/elasticsearch`                 |
-| JanusGraph       | Property graph DB over Cassandra/ES  | `charts.janusgraph.org`                 |
-| Apache Ignite    | In-memory data grid / compute        | `apacheignite/ignite-kubernetes`        |
-| Apache Flink     | Stream analytics / batch processing  | `bitnami/flink`                         |
-| MinIO            | S3-compatible object storage         | `minio/minio`                           |
+This Terraform setup will deploy and configure the following services into the `q-platform` namespace:
 
-All releases are created in a single namespace (default: `q-platform`). Chart versions and resource tuning live in `variables.tf` and the `values/` directory.
+-   **Keycloak**: For identity and access management.
+-   **Milvus**: As our core vector database.
+-   **Istio Policies**: The necessary `RequestAuthentication` and `AuthorizationPolicy` resources to secure the service mesh.
+-   (Other services like Pulsar, etc., are also managed here but are omitted for brevity).
 
 ## Prerequisites
 
-1. A working Kubernetes cluster (v1.25+ recommended)
-2. `kubectl` configured to talk to the cluster (kubeconfig path defaults to `~/.kube/config`)
-3. Terraform ≥ 1.4 installed locally
-4. Helm ≥ 3.10 installed locally (Terraform Helm provider shells out to Helm)
+1.  **Terraform**: Install Terraform (version >= 1.4.0).
+2.  **kubectl**: Install `kubectl` and ensure it is configured to point to your target Kubernetes cluster.
+3.  **Helm**: Install the Helm CLI.
 
-## Quick Start
+## Deployment Steps
+
+### Step 1: Initialize Terraform
+
+Navigate to this directory and initialize Terraform. This will download the necessary providers (Kubernetes, Helm).
 
 ```bash
 cd infra/terraform
-terraform init      # downloads providers and charts
-terraform plan      # shows resources to create
-terraform apply     # provisions everything
+terraform init
 ```
 
-Override any variable at apply time, e.g.:
+### Step 2: Review and Customize Configuration (Optional)
+
+1.  **Service Versions**: The versions for all Helm charts are pinned in `main.tf` for stability.
+2.  **Service Values**: Default configurations for all services are in the `values/` directory. You can modify these files to change service settings (e.g., resource limits, persistence sizes).
+3.  **Keycloak URL**: The Istio security policy depends on the Keycloak issuer URL. The default is `http://localhost:8080/realms/q-platform`. If your Keycloak will be exposed at a different address, you can override this variable.
+
+    Create a `terraform.tfvars` file:
+    ```tf
+    keycloak_issuer_url = "https://your-keycloak-domain.com/realms/q-platform"
+    ```
+
+### Step 3: Apply the Terraform Plan
+
+Apply the configuration to deploy all the services to your cluster.
 
 ```bash
-terraform apply -var namespace=my-q -var pulsar_chart_version=5.2.0
+terraform apply -auto-approve
 ```
 
-## Tearing Down
+This command will:
+-   Create the `q-platform` namespace if it doesn't exist.
+-   Add the `bitnami` and `milvus` Helm repositories.
+-   Deploy Keycloak and Milvus using the configurations in the `values/` directory.
+-   Apply the Istio security policies to your cluster.
+
+## Post-Deployment
+
+After the `apply` command finishes, you can use `kubectl get pods -n q-platform` to see the services starting up. You will also need to find the external IP address of the `LoadBalancer` services for Keycloak and Milvus to access their UIs and APIs.
 
 ```bash
-terraform destroy
+kubectl get svc -n q-platform
 ```
 
-## Customizing Helm Values
+## Destroying the Infrastructure
 
-Each service has a corresponding YAML file under `values/`. Adjust replicas, storage class, resources, etc. as needed.
+To tear down all the deployed services, run the destroy command:
 
-## Roadmap
-
-- Add Prometheus/Grafana stack (needed for observability)
-- Expose Pulsar proxy, Flink UI, and MinIO Console via Ingress
-- Add ArgoCD Helm release to bootstrap GitOps
-- Parameterize storage classes for on-prem vs. cloud 
+```bash
+terraform destroy -auto-approve
+``` 

@@ -1,5 +1,16 @@
-# KnowledgeGraphQ/requirements.txt
-pymilvus==2.3.0
-sentence-transformers==2.5.1
-tqdm==4.66.2
-gremlinpython==3.7.0
+# Core graph libraries
+# janusgraph-python (if a Python driver is to be used)
+# gremlinpython
+
+# For document loading and chunking
+langchain
+
+# For generating vector embeddings
+sentence-transformers
+torch
+
+# For communicating with VectorStoreQ
+httpx
+
+# Local Shared Libraries (install in editable mode from project root)
+# -e ./shared/q_vectorstore_client

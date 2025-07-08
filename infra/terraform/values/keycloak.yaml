@@ -1,0 +1,18 @@
+# Keycloak Helm Chart Values
+# Full list of values: https://github.com/bitnami/charts/blob/main/bitnami/keycloak/values.yaml
+
+# Administrator credentials
+# IMPORTANT: For production, use a pre-existing secret or an external secret management system.
+auth:
+  adminUser: "admin"
+  adminPassword: "Password123"
+
+# Expose Keycloak via a LoadBalancer service for easy access
+# For local dev (e.g., Minikube), you might prefer NodePort or use `kubectl port-forward`
+service:
+  type: LoadBalancer
+
+# Persist data to a PVC
+persistence:
+  enabled: true
+  size: 10Gi 

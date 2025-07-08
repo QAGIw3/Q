@@ -2,7 +2,7 @@ from fastapi import FastAPI
 import uvicorn
 import logging
 
-from app.api import ingest, search
+from app.api import ingest, search, management
 from app.core.config import config
 from app.core.milvus_handler import milvus_handler
 from shared.opentelemetry.tracing import setup_tracing
@@ -55,6 +55,7 @@ def shutdown_event():
 # Include the API routers
 app.include_router(ingest.router, prefix="/v1/ingest", tags=["Ingestion"])
 app.include_router(search.router, prefix="/v1/search", tags=["Search"])
+app.include_router(management.router, prefix="/v1/manage", tags=["Management"])
 
 @app.get("/health", tags=["Health"])
 def health_check():

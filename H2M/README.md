@@ -82,7 +82,12 @@ export PYTHONPATH=$(pwd)
 uvicorn H2M.app.main:app --host 0.0.0.0 --port 8002 --reload
 ```
 
-You can then connect to the WebSocket at `ws://127.0.0.1:8002/chat/ws`.
+You can then connect to the WebSocket, but you must now provide the authenticated user's claims as a query parameter.
+
+**Example Connection URL:**
+`ws://127.0.0.1:8002/chat/ws?claims=<base64-encoded-claims>`
+
+A simple client would need to first authenticate with Keycloak, get the JWT, extract its claims payload, base64-encode it, and then use that string to open the WebSocket connection.
 
 ---
 

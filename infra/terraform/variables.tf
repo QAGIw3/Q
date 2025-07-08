@@ -92,4 +92,10 @@ variable "seatunnel_chart_version" {
   description = "The version of the Apache SeaTunnel Helm chart to deploy."
   type        = string
   default     = "2.3.10"
+}
+
+variable "keycloak_issuer_url" {
+  type        = string
+  description = "The OIDC issuer URL for the Keycloak realm."
+  default     = "http://localhost:8080/realms/q-platform" # Example default for local dev
 } 

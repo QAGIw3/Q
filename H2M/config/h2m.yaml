@@ -22,6 +22,12 @@ rag:
   default_top_k: 5
   collection_name: "rag_document_chunks"
 
+# Pulsar Configuration for receiving replies
+pulsar:
+  service_url: "pulsar://localhost:6650"
+  topics:
+    reply_prefix: "persistent://public/default/h2m-replies-"
+
 # OpenTelemetry Configuration
 otel:
   enabled: true

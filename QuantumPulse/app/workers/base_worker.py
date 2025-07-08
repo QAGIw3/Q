@@ -3,7 +3,7 @@ from pulsar.schema import JsonSchema
 import logging
 import time
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from app.models.inference import RoutedInferenceRequest, InferenceResponse
 from app.core.config import config
@@ -34,31 +34,30 @@ class BaseWorker(ABC):
         self.config = config # Use the global config
         self._client: Optional[pulsar.Client] = None
         self._consumer: Optional[pulsar.Consumer] = None
-        self._producer: Optional[pulsar.Producer] = None
+        # The producer is now created dynamically per request.
+        self._producers: Dict[str, pulsar.Producer] = {}
 
-    def connect(self):
-        """Connects to Pulsar and sets up the consumer and producer."""
-        pulsar_conf = self.config.pulsar
-        self._client = pulsar.Client(pulsar_conf.service_url)
-        
-        # Setup consumer for routed requests
-        # Topic is dynamically determined, e.g., 'routed-model-a-shard-1'
-        # This base class assumes one worker per shard topic.
-        shard_topic_name = f"{pulsar_conf.topics.routed_prefix}{self.model_name}-{self.subscription_name}"
-        self._consumer = self._client.subscribe(
-            shard_topic_name,
-            subscription_name=f"{self.model_name}-worker-sub",
-            schema=JsonSchema(RoutedInferenceRequest)
-        )
-        logger.info(f"Subscribed to topic: {shard_topic_name}")
+    def _load_config(self):
+        try:
+            pulsar_conf = self.config.pulsar
+            self._client = pulsar.Client(pulsar_conf.service_url)
+            
+            # Setup consumer for routed requests
+            # Topic is dynamically determined, e.g., 'routed-model-a-shard-1'
+            # This base class assumes one worker per shard topic.
+            shard_topic_name = f"{pulsar_conf.topics.routed_prefix}{self.model_name}-{self.subscription_name}"
+            self._consumer = self._client.subscribe(
+                shard_topic_name,
+                subscription_name=f"{self.model_name}-worker-sub",
+                schema=JsonSchema(RoutedInferenceRequest)
+            )
+            logger.info(f"Subscribed to topic: {shard_topic_name}")
 
-        # Setup producer for results
-        results_topic = pulsar_conf.topics.results
-        self._producer = self._client.create_producer(
-            results_topic,
-            schema=JsonSchema(InferenceResponse)
-        )
-        logger.info(f"Created producer for topic: {results_topic}")
+            # The producer is no longer created here, but on-demand.
+
+        except Exception as e:
+            logger.error(f"Failed to connect to Pulsar: {e}", exc_info=True)
+            raise
 
     @abstractmethod
     def load_model(self):
@@ -73,7 +72,7 @@ class BaseWorker(ABC):
     def run(self):
         """The main loop for the worker."""
         self.load_model()
-        self.connect()
+        self._load_config() # Call the new method to establish connection
         logger.info(f"Worker for model '{self.model_name}' started. Waiting for messages...")
 
         while True:
@@ -96,9 +95,17 @@ class BaseWorker(ABC):
 
                     try:
                         response = self.infer(request)
-                        self._producer.send(response)
+                        
+                        # Dynamically get a producer for the reply topic
+                        if request.reply_to_topic:
+                            reply_producer = self._get_producer(request.reply_to_topic)
+                            reply_producer.send(response)
+                            logger.info(f"Sent response for request {request.request_id} to topic {request.reply_to_topic}")
+                        else:
+                            logger.warning(f"No reply_to_topic specified for request {request.request_id}. Dropping response.")
+
                         self._consumer.acknowledge(msg)
-                        logger.info(f"Successfully processed and responded to request: {request.request_id}")
+                        logger.info(f"Successfully processed and acknowledged request: {request.request_id}")
                     except Exception as e:
                         span.record_exception(e)
                         span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
@@ -109,12 +116,22 @@ class BaseWorker(ABC):
                 logger.error(f"An error occurred in the main worker loop: {e}", exc_info=True)
                 time.sleep(5) # Avoid rapid-fire errors
 
+    def _get_producer(self, topic: str) -> pulsar.Producer:
+        """Gets or creates a producer for a given topic."""
+        if topic not in self._producers:
+            logger.info(f"Creating new producer for reply topic: {topic}")
+            self._producers[topic] = self._client.create_producer(
+                topic,
+                schema=JsonSchema(InferenceResponse)
+            )
+        return self._producers[topic]
+
     def close(self):
         """Cleans up resources."""
         if self._consumer:
             self._consumer.close()
-        if self._producer:
-            self._producer.close()
+        for producer in self._producers.values():
+            producer.close()
         if self._client:
             self._client.close()
         logger.info("Worker resources cleaned up.")

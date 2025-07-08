@@ -6,6 +6,7 @@ from app.core.rag import rag_module
 from app.core.config import get_config
 from shared.q_pulse_client.client import QuantumPulseClient
 from shared.q_pulse_client.models import InferenceRequest
+from app.services.pulsar_client import h2m_pulsar_client
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,21 +21,22 @@ class ConversationOrchestrator:
         services_config = get_config().services
         self.qp_client = QuantumPulseClient(base_url=services_config.quantumpulse_url)
 
-    async def handle_message(self, text: str, conversation_id: str = None) -> (str, str):
+    async def handle_message(self, user_id: str, text: str, conversation_id: str = None) -> (str, str):
         """
         The main method to process a user's message and get a response.
 
         Args:
+            user_id: The unique ID of the authenticated user.
             text: The user's input message.
             conversation_id: The existing conversation ID, if any.
 
         Returns:
             A tuple containing the final AI response text and the conversation ID.
         """
-        logger.info(f"Orchestrator: Handling message for conversation: {conversation_id}")
+        logger.info(f"Orchestrator: Handling message for user '{user_id}' in conversation '{conversation_id}'")
 
         # 1. Get conversation history
-        conv_id, history = await context_manager.get_or_create_conversation_history(conversation_id)
+        conv_id, history = await context_manager.get_or_create_conversation_history(user_id, conversation_id)
 
         # 2. Get RAG context
         rag_context = await rag_module.retrieve_context(text)
@@ -42,22 +44,33 @@ class ConversationOrchestrator:
         # 3. Construct the final prompt
         final_prompt = self._build_prompt(text, history, rag_context)
 
-        # 4. Submit to QuantumPulse for inference
-        # In a real streaming scenario, we would get a request_id and then listen
-        # on a WebSocket for the response associated with that ID.
-        # Here, we will simulate a response for simplicity.
-        inference_request = InferenceRequest(prompt=final_prompt, conversation_id=conv_id)
-        request_id = await self.qp_client.submit_inference(inference_request)
-        
-        # --- Simulation of receiving a response ---
-        # In a real system, this part would be handled by a separate process
-        # listening on a WebSocket or a Pulsar topic for results.
-        logger.info(f"Submitted inference request {request_id}. Simulating response.")
-        ai_response_text = f"This is a simulated AI response to your query about '{text[:30]}...' based on the retrieved context."
-        # --- End Simulation ---
+        # 4. Create a temporary topic for the reply
+        reply_topic, consumer = await h2m_pulsar_client.create_consumer_for_reply()
 
-        # 5. Save the new turn to the conversation history
-        await context_manager.add_message_to_history(conv_id, text, ai_response_text)
+        try:
+            # 5. Submit to QuantumPulse for inference, telling it where to reply
+            inference_request = InferenceRequest(
+                prompt=final_prompt,
+                conversation_id=conv_id,
+                reply_to_topic=reply_topic
+            )
+            request_id = await self.qp_client.submit_inference(inference_request)
+            logger.info(f"Submitted inference request {request_id}. Waiting for response on {reply_topic}.")
+
+            # 6. Wait for the real response
+            response_msg = await h2m_pulsar_client.await_response(consumer)
+            ai_response_text = response_msg.value().text
+            
+            # 7. Acknowledge the message
+            consumer.acknowledge(response_msg)
+            logger.info(f"Received real-time response for request {request_id}.")
+
+        finally:
+            # 8. Clean up the temporary consumer
+            consumer.close()
+
+        # 9. Save the new turn to the conversation history
+        await context_manager.add_message_to_history(user_id, conv_id, text, ai_response_text)
         
         logger.info(f"Orchestrator: Successfully handled message for conversation {conv_id}")
         return ai_response_text, conv_id

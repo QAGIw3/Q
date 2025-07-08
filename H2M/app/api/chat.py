@@ -3,7 +3,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from pydantic import BaseModel
 
 from app.core.orchestrator import orchestrator
-from shared.q_auth_parser.parser import get_user_claims
+from shared.q_auth_parser.parser import get_user_claims_ws
 from shared.q_auth_parser.models import UserClaims
 
 # Configure logging
@@ -16,12 +16,12 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    # This is a simplified auth flow for WebSockets.
-    # A robust implementation would handle the token in the initial connection handshake.
-    # For now, we assume a secure connection is established.
+async def websocket_endpoint(
+    websocket: WebSocket,
+    claims: UserClaims = Depends(get_user_claims_ws)
+):
     await websocket.accept()
-    logger.info("WebSocket connection established.")
+    logger.info(f"WebSocket connection established for user: {claims.sub}")
     
     try:
         while True:
@@ -33,6 +33,7 @@ async def websocket_endpoint(websocket: WebSocket):
             
             # Use the orchestrator to handle the message and get a response
             ai_response, conv_id = await orchestrator.handle_message(
+                user_id=claims.sub,
                 text=request.text,
                 conversation_id=request.conversation_id
             )
@@ -46,8 +47,8 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.info(f"Sent response for conversation: {conv_id}")
 
     except WebSocketDisconnect:
-        logger.info("WebSocket connection closed.")
+        logger.info(f"WebSocket connection for user {claims.sub} closed.")
     except Exception as e:
-        logger.error(f"An error occurred in the WebSocket endpoint: {e}", exc_info=True)
+        logger.error(f"An error occurred in the WebSocket for user {claims.sub}: {e}", exc_info=True)
         # Attempt to send an error message before closing
         await websocket.close(code=1011, reason=f"An internal error occurred: {e}") 

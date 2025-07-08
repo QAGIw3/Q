@@ -1,9 +1,10 @@
 import logging
-from pymilvus import utility, connections, Collection
+from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema as MilvusField, DataType
 from typing import List, Dict, Any
 
 from .config import get_config
 from shared.q_vectorstore_client.models import Vector, Query, SearchHit, QueryResult
+from app.api.management import CollectionSchema as ApiCollectionSchema, IndexParams
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -54,6 +55,65 @@ class MilvusHandler:
         except Exception as e:
             logger.error(f"Failed to disconnect from Milvus: {e}", exc_info=True)
             raise
+
+    def create_collection_with_index(self, schema_def: ApiCollectionSchema, index_params: IndexParams) -> Dict[str, bool]:
+        """
+        Creates a new collection and a vector index if it doesn't already exist.
+
+        Args:
+            schema_def: The Pydantic model defining the collection schema.
+            index_params: The Pydantic model defining the vector index.
+
+        Returns:
+            A dictionary indicating if the collection was created.
+        """
+        self.connect()
+        collection_name = schema_def.collection_name
+        
+        if utility.has_collection(collection_name, using=self.alias):
+            logger.info(f"Collection '{collection_name}' already exists.")
+            return {"created": False}
+
+        # Convert Pydantic FieldSchema to Milvus FieldSchema
+        milvus_fields = []
+        for f in schema_def.fields:
+            field_args = {
+                "name": f.name,
+                "dtype": getattr(DataType, f.dtype.upper()),
+                "is_primary": f.is_primary,
+            }
+            if f.dtype.lower() == 'varchar':
+                field_args["max_length"] = f.max_length
+            if f.dtype.lower() == 'float_vector':
+                field_args["dim"] = f.dim
+            milvus_fields.append(MilvusField(**field_args))
+
+        # Create the Milvus CollectionSchema
+        milvus_schema = CollectionSchema(
+            fields=milvus_fields,
+            description=schema_def.description,
+            enable_dynamic_field=schema_def.enable_dynamic_field
+        )
+
+        # Create the collection
+        collection = Collection(
+            name=collection_name,
+            schema=milvus_schema,
+            using=self.alias
+        )
+        logger.info(f"Collection '{collection_name}' created.")
+
+        # Create the index
+        collection.create_index(
+            field_name=index_params.field_name,
+            index_params={
+                "index_type": index_params.index_type,
+                "metric_type": index_params.metric_type,
+                "params": index_params.params
+            }
+        )
+        logger.info(f"Index created on field '{index_params.field_name}' for collection '{collection_name}'.")
+        return {"created": True}
 
     def get_collection(self, collection_name: str) -> Collection:
         """
