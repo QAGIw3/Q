@@ -1,0 +1,21 @@
+# infra/terraform/values/tempo.yaml
+#
+# Minimal values for a local/dev Grafana Tempo setup.
+# Full values list: https://github.com/grafana/helm-charts/blob/main/charts/tempo/values.yaml
+
+# Disable persistence for local dev
+persistence:
+  enabled: false
+
+# Disable high-availability features
+ingester:
+  replicas: 1
+distributor:
+  replicas: 1
+compactor:
+  replicas: 1
+
+# Disable authentication/TLS for local dev
+server:
+  http_tls_enabled: false
+  grpc_tls_enabled: false 

@@ -1,0 +1,5 @@
+# KnowledgeGraphQ/requirements.txt
+pymilvus==2.3.0
+sentence-transformers==2.5.1
+tqdm==4.66.2
+gremlinpython==3.7.0

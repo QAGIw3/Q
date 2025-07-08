@@ -62,4 +62,34 @@ variable "harbor_chart_version" {
   description = "Helm chart version for Harbor."
   type        = string
   default     = "1.13.2"
+}
+
+variable "tempo_chart_version" {
+  description = "Helm chart version for Grafana Tempo."
+  type        = string
+  default     = "1.8.0"
+}
+
+variable "istio_base_chart_version" {
+  description = "Helm chart version for Istio Base."
+  type        = string
+  default     = "1.21.0"
+}
+
+variable "istiod_chart_version" {
+  description = "Helm chart version for IstioD (Control Plane)."
+  type        = string
+  default     = "1.21.0"
+}
+
+variable "istio_gateway_chart_version" {
+  description = "Helm chart version for Istio Ingress Gateway."
+  type        = string
+  default     = "1.21.0"
+}
+
+variable "seatunnel_chart_version" {
+  description = "The version of the Apache SeaTunnel Helm chart to deploy."
+  type        = string
+  default     = "2.3.10"
 } 

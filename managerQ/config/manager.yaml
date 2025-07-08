@@ -1,0 +1,19 @@
+# managerQ/config/manager.yaml
+#
+# Configuration for the QuantumPulse Manager (managerQ)
+
+pulsar:
+  service_url: "pulsar://localhost:6650"
+  
+  # Topic for receiving new prompts from H2M
+  prompts_intake_topic: "q.h2m.prompts.intake"
+  prompts_subscription: "managerq-prompts-subscription"
+  
+  # Topic for agents to register on startup
+  agent_registration_topic: "q.managerq.registration"
+  registration_subscription: "managerq-registration-subscription"
+
+ignite:
+  host: "localhost"
+  port: 10800
+  cache_name: "agent_registry" # Cache to store active agent topics

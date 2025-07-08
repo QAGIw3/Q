@@ -1,0 +1,7 @@
+# infra/terraform/values/istiod.yaml
+#
+# Values for the Istio control plane (istiod).
+# We are using the 'default' profile which is a good starting point.
+# See all profiles: https://istio.io/latest/docs/setup/additional-setup/config-profiles/
+
+profile: default 

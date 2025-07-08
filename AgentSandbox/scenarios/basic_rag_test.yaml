@@ -1,0 +1,17 @@
+# AgentSandbox/scenarios/basic_rag_test.yaml
+#
+# A basic scenario to test the end-to-end RAG workflow.
+
+name: "Basic RAG and Agent Test"
+description: "Sends a generic prompt and a specific prompt that should trigger RAG."
+h2m_endpoint: "http://localhost:8000/translate" # Assuming H2M runs on port 8000
+
+steps:
+  - name: "Generic Greeting"
+    intent: "Hello, how are you?"
+    
+  - name: "Specific RAG Query"
+    intent: "What are the key responsibilities of agentQ?"
+    # We expect the RAG system to find the agentq_details.md document
+    # and include context that contains this keyword.
+    expected_keyword: "Autonomous"

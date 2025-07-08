@@ -159,4 +159,73 @@ resource "helm_release" "harbor" {
   values = [
     file("${path.module}/values/harbor.yaml")
   ]
+}
+
+# ----------------------------
+# Grafana Tempo (for tracing)
+# ----------------------------
+resource "helm_release" "tempo" {
+  name       = "tempo"
+  repository = "https://grafana.github.io/helm-charts"
+  chart      = "tempo"
+  version    = var.tempo_chart_version
+
+  namespace  = var.namespace
+  values = [
+    file("${path.module}/values/tempo.yaml")
+  ]
+}
+
+# ----------------------------
+# Istio Service Mesh
+# ----------------------------
+resource "helm_release" "istio_base" {
+  name       = "istio-base"
+  repository = "https://istio-release.storage.googleapis.com/charts"
+  chart      = "base"
+  version    = var.istio_base_chart_version
+
+  namespace  = "istio-system"
+  create_namespace = true
+}
+
+resource "helm_release" "istiod" {
+  name       = "istiod"
+  repository = "https://istio-release.storage.googleapis.com/charts"
+  chart      = "istiod"
+  version    = var.istiod_chart_version
+
+  namespace  = "istio-system"
+  
+  values = [
+    file("${path.module}/values/istiod.yaml")
+  ]
+
+  depends_on = [helm_release.istio_base]
+}
+
+resource "helm_release" "istio_gateway" {
+  name       = "istio-ingressgateway"
+  repository = "https://istio-release.storage.googleapis.com/charts"
+  chart      = "gateway"
+  version    = var.istio_gateway_chart_version
+
+  namespace  = "istio-system"
+  
+  depends_on = [helm_release.istiod]
+} 
+
+# ----------------------------
+# Apache SeaTunnel
+# ----------------------------
+resource "helm_release" "seatunnel" {
+  name       = "seatunnel"
+  repository = "oci://registry-1.docker.io/apache"
+  chart      = "seatunnel-helm"
+  version    = var.seatunnel_chart_version
+
+  namespace  = var.namespace
+  values = [
+    file("${path.module}/values/seatunnel.yaml")
+  ]
 } 

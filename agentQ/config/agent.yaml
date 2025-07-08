@@ -1,0 +1,16 @@
+# agentQ/config/agent.yaml
+#
+# Configuration for the QuantumPulse Agent (agentQ)
+
+pulsar:
+  service_url: "pulsar://localhost:6650"
+  
+  # Topic for registering with managerQ
+  registration_topic: "q.managerq.registration"
+  
+  # Topic for publishing results (remains the same)
+  results_topic: "q.agentq.results"
+
+llm:
+  provider: "openai"
+  model: "gpt-3.5-turbo"

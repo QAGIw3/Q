@@ -1,0 +1,3 @@
+# ResultListener/requirements.txt
+apache-pulsar-client==3.5.0
+fastavro==1.9.4
