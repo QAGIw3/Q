@@ -3,4 +3,5 @@ uvicorn[standard]
 pydantic
 python-multipart
 jinja2
-httpx 
+zulip
+pulsar-client 

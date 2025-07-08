@@ -1,0 +1,18 @@
+# Core API
+fastapi
+uvicorn[standard]
+pydantic
+
+# Messaging
+pulsar-client
+
+# Configuration
+pyyaml
+
+# In-Memory Data Grid / Cache
+pyignite
+
+# Utilities
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi 

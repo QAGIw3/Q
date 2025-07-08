@@ -5,7 +5,8 @@ import uuid
 class FlowStep(BaseModel):
     name: str = Field(..., description="Name of the step.")
     connector_id: str = Field(..., description="The ID of the connector to use for this step.")
-    configuration: Dict[str, Any] = Field(..., description="Configuration values for the connector.")
+    configuration: Dict[str, Any] = Field({}, description="Non-secret configuration values for the connector.")
+    credential_id: Optional[str] = Field(default=None, description="The ID of the credential to use for this step, if any.")
 
 class FlowTrigger(BaseModel):
     type: str = Field(..., description="Type of trigger, e.g., 'webhook', 'schedule', 'pulsar'.")

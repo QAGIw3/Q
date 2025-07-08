@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: quantumpulse-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/usr/src/app/app
+      - ./config:/usr/src/app/config
+    environment:
+      # Allows connecting to services running on the host machine
+      - PULSAR_SERVICE_URL=pulsar://host.docker.internal:6650
+    # 'host.docker.internal' lets the container connect to services on the host
+    # This is useful for connecting to a Pulsar instance running locally on the host machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  worker-model-a-shard-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: quantumpulse-worker-a1
+    volumes:
+      - ./app:/usr/src/app/app
+      - ./config:/usr/src/app/config
+      - ./model_repository:/usr/src/app/model_repository
+    command: >
+      python app/workers/specific_model_worker.py 
+      --model-name model-a 
+      --shard-id shard-1
+    environment:
+      - PULSAR_SERVICE_URL=pulsar://host.docker.internal:6650
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - api
+
+  worker-model-a-shard-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: quantumpulse-worker-a2
+    volumes:
+      - ./app:/usr/src/app/app
+      - ./config:/usr/src/app/config
+      - ./model_repository:/usr/src/app/model_repository
+    command: >
+      python app/workers/specific_model_worker.py 
+      --model-name model-a 
+      --shard-id shard-2
+    environment:
+      - PULSAR_SERVICE_URL=pulsar://host.docker.internal:6650
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - api
+
+networks:
+  default:
+    name: quantumpulse-net 

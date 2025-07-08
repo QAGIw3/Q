@@ -1,0 +1,12 @@
+# This file contains dependencies for development and testing.
+# Install these using: pip install -r requirements-dev.txt
+
+# Start with the production requirements
+-r requirements.txt
+
+# Testing framework
+pytest
+pytest-asyncio
+
+# For making HTTP requests in tests
+httpx 

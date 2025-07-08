@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 from typing import List, Dict
 
 from ..models.flow import Flow
-from ..core.engine import run_flow
+from ..core.pulsar_client import publish_flow_trigger
 
 router = APIRouter()
 
@@ -58,12 +58,12 @@ def delete_flow(flow_id: str):
 @router.post("/{flow_id}/trigger", status_code=status.HTTP_202_ACCEPTED)
 def trigger_flow(flow_id: str):
     """
-    Manually trigger an integration flow to run.
+    Manually triggers an integration flow to run by sending it to a Pulsar topic.
     """
     if flow_id not in flows_db:
         raise HTTPException(status_code=404, detail=f"Flow with ID {flow_id} not found")
     
     flow = flows_db[flow_id]
-    run_flow(flow) # Execute the flow using our simple engine
+    publish_flow_trigger(flow) # Publish the flow execution request
 
-    return {"message": "Flow execution triggered successfully"} 
+    return {"message": "Flow execution has been triggered successfully"} 

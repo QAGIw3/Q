@@ -1,0 +1,21 @@
+# Use an official Python runtime as a parent image
+# For real GPU inference, you would use a base image with CUDA/cuDNN pre-installed,
+# for example, nvidia/cuda:11.8.0-runtime-ubuntu22.04
+FROM python:3.9-slim
+
+# Set the working directory in the container
+WORKDIR /usr/src/app
+
+# Install dependencies
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the application code into the container
+COPY ./app ./app
+COPY ./config ./config
+COPY ./model_repository ./model_repository
+
+# The entrypoint script will be specified at runtime
+# This allows the same image to be used for different workers
+# For example: docker run quantumpulse-worker python app/workers/specific_model_worker.py --model-name model-a --shard-id shard-1
+CMD ["echo", "Please specify a worker script to run, e.g., python app/workers/my_worker.py"] 
