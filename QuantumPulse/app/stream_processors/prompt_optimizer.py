@@ -1,5 +1,5 @@
 import logging
-import os
+import subprocess
 from app.core.config import config
 
 # Configure logging
@@ -8,38 +8,32 @@ logger = logging.getLogger(__name__)
 
 def submit_flink_job():
     """
-    Submits the Prompt Optimizer Flink job to the cluster.
-    
-    This is a placeholder script. In a real-world scenario, this would use
-    the Flink REST API to upload the JAR and start the job.
+    Submits the Prompt Optimizer PyFlink job to the cluster.
     """
     try:
         flink_config = config.flink
-        rest_url = flink_config.rest_url
-        jar_path = flink_config.prompt_optimizer_jar_path
+        job_path = flink_config.prompt_optimizer_job_path
 
-        logger.info(f"Submitting Flink job from JAR: {jar_path}")
-        logger.info(f"Target Flink cluster: {rest_url}")
+        logger.info(f"Submitting PyFlink job from path: {job_path}")
 
-        # Example command to submit the job (for illustration)
-        # This requires the JAR to be built and available.
-        submit_command = (
-            f"flink run -d {jar_path} "
-            f"--pulsar-url {config.pulsar.service_url} "
-            f"--input-topic {config.pulsar.topics.requests} "
-            f"--output-topic {config.pulsar.topics.preprocessed}"
-        )
+        # Command to submit the PyFlink job
+        # Assumes 'flink' executable is in the PATH.
+        # This command runs the job in detached mode.
+        submit_command = [
+            "flink", "run", "-d",
+            "-py", job_path
+        ]
         
-        logger.info("This is a placeholder. To run for real, execute a command like:")
-        logger.info(submit_command)
+        logger.info(f"Executing command: {' '.join(submit_command)}")
         
-        # In a real implementation, you would use `requests` or a client library
-        # to interact with the Flink REST API's /jars/upload and /jars/:jarid/run endpoints.
-        
-        # Example using os.system for demonstration (not recommended for production)
-        # os.system(submit_command)
+        result = subprocess.run(submit_command, capture_output=True, text=True)
 
-        logger.info("Flink job submission script finished.")
+        if result.returncode == 0:
+            logger.info("Flink job submitted successfully.")
+            logger.info(f"Flink output:\n{result.stdout}")
+        else:
+            logger.error("Failed to submit Flink job.")
+            logger.error(f"Flink error output:\n{result.stderr}")
 
     except Exception as e:
         logger.error(f"Failed to configure or submit Flink job: {e}", exc_info=True)

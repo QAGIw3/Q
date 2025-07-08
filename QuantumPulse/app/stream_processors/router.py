@@ -1,5 +1,5 @@
 import logging
-import os
+import subprocess
 from app.core.config import config
 
 # Configure logging
@@ -8,35 +8,30 @@ logger = logging.getLogger(__name__)
 
 def submit_flink_job():
     """
-    Submits the Dynamic Router Flink job to the cluster.
-    
-    This is a placeholder script. In a real-world scenario, this would use
-    the Flink REST API to upload the JAR and start the job.
+    Submits the Dynamic Router PyFlink job to the cluster.
     """
     try:
         flink_config = config.flink
-        rest_url = flink_config.rest_url
-        jar_path = flink_config.dynamic_router_jar_path
+        job_path = flink_config.dynamic_router_job_path
 
-        logger.info(f"Submitting Flink job from JAR: {jar_path}")
-        logger.info(f"Target Flink cluster: {rest_url}")
+        logger.info(f"Submitting PyFlink job from path: {job_path}")
 
-        # Example command to submit the job (for illustration)
-        # The actual job would need more sophisticated logic for routing.
-        submit_command = (
-            f"flink run -d {jar_path} "
-            f"--pulsar-url {config.pulsar.service_url} "
-            f"--input-topic {config.pulsar.topics.preprocessed} "
-            f"--output-topic-prefix {config.pulsar.topics.routed_prefix}"
-        )
+        # Command to submit the PyFlink job
+        submit_command = [
+            "flink", "run", "-d",
+            "-py", job_path
+        ]
         
-        logger.info("This is a placeholder. To run for real, execute a command like:")
-        logger.info(submit_command)
+        logger.info(f"Executing command: {' '.join(submit_command)}")
         
-        # In a real implementation, you would use `requests` or a client library
-        # to interact with the Flink REST API.
-        
-        logger.info("Flink job submission script finished.")
+        result = subprocess.run(submit_command, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            logger.info("Flink job submitted successfully.")
+            logger.info(f"Flink output:\n{result.stdout}")
+        else:
+            logger.error("Failed to submit Flink job.")
+            logger.error(f"Flink error output:\n{result.stderr}")
 
     except Exception as e:
         logger.error(f"Failed to configure or submit Flink job: {e}", exc_info=True)

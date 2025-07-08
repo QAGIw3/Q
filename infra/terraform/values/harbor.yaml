@@ -1,18 +1,16 @@
-# infra/terraform/values/harbor.yaml
-#
-# Minimal values for a local/dev Harbor setup.
-# Full values list: https://github.com/goharbor/harbor-helm/blob/master/values.yaml
+# Basic Harbor configuration for development
+# See: https://github.com/goharbor/harbor-helm/blob/master/values.yaml
 
-# Use ClusterIP services and port-forward for local access.
-# In production, you would configure Ingress.
 expose:
-  type: clusterIP
+  type: loadBalancer
+  tls:
+    enabled: false
 
-# IMPORTANT: Change this in any real environment.
-# Use 'harbor' as the default admin password for local dev.
-harborAdminPassword: harbor
+externalURL: http://localhost # This will be the external IP of the load balancer
 
-# Disable components not needed for a minimal setup to save resources.
+harborAdminPassword: "Password123"
+
+# Disable services not needed for a basic dev setup
 notary:
   enabled: false
 
@@ -22,10 +20,14 @@ trivy:
 chartmuseum:
   enabled: false
 
-# Use internal persistence.
-# For production, you would configure external PostgreSQL and Redis.
-database:
-  type: internal
+portal:
+  enabled: true # Keep the UI enabled
 
-redis:
-  type: internal 
+# Use internal persistence
+persistence:
+  enabled: true
+  resourcePolicy: "keep"
+  imageChartStorage:
+    type: "filesystem"
+    filesystem:
+      rootdirectory: /storage 

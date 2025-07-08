@@ -44,8 +44,9 @@ models:
 # Flink Configuration
 flink:
   rest_url: "http://localhost:8081"
-  prompt_optimizer_jar_path: "/path/to/prompt-optimizer.jar"
-  dynamic_router_jar_path: "/path/to/dynamic-router.jar"
+  # Paths are relative to the project root
+  prompt_optimizer_job_path: "QuantumPulse/flink_jobs/prompt_optimizer/prompt_optimizer_job.py"
+  dynamic_router_job_path: "QuantumPulse/flink_jobs/dynamic_router/dynamic_router_job.py"
 
 # OpenTelemetry Configuration
 otel:

@@ -34,6 +34,11 @@ resource "helm_repository" "milvus" {
   url  = "https://milvus-io.github.io/milvus-helm/"
 }
 
+resource "helm_repository" "goharbor" {
+  name = "goharbor"
+  url  = "https://helm.goharbor.io"
+}
+
 # --- Helm Releases for Core Infrastructure ---
 
 resource "helm_release" "keycloak" {
@@ -58,5 +63,17 @@ resource "helm_release" "milvus" {
 
   values = [
     file("${path.module}/values/milvus.yaml")
+  ]
+}
+
+resource "helm_release" "harbor" {
+  name       = "harbor"
+  repository = helm_repository.goharbor.name
+  chart      = "harbor"
+  version    = "1.13.2" # Pinning version for stability
+  namespace  = "q-platform"
+
+  values = [
+    file("${path.module}/values/harbor.yaml")
   ]
 } 

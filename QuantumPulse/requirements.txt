@@ -12,6 +12,9 @@ pyyaml
 # In-Memory Data Grid / Cache
 pyignite
 
+# Stream Processing
+apache-flink
+
 # Utilities
 opentelemetry-api
 opentelemetry-sdk
