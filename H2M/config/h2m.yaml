@@ -1,0 +1,28 @@
+service_name: "H2M"
+version: "0.1.0"
+
+# API Server Configuration
+api:
+  host: "0.0.0.0"
+  port: 8002
+
+# Service Endpoints
+services:
+  quantumpulse_url: "http://localhost:8000"
+  vectorstore_url: "http://localhost:8001"
+
+# Ignite Configuration for Conversation History
+ignite:
+  addresses:
+    - "127.0.0.1:10800"
+  cache_name: "h2m_conversation_history"
+
+# RAG Module Configuration
+rag:
+  default_top_k: 5
+  collection_name: "rag_document_chunks"
+
+# OpenTelemetry Configuration
+otel:
+  enabled: true
+  endpoint: "http://localhost:4317" 

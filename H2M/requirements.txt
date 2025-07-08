@@ -1,18 +1,26 @@
-fastapi==0.110.0
-uvicorn[standard]==0.29.0
-openai==1.14.3
-anthropic==0.25.0
-apache-pulsar-client==3.5.0
-pyignite==0.5.0
-fastavro==1.9.4
-pydantic==2.6.4
-python-dotenv==1.0.1
-pymilvus==2.3.0
-sentence-transformers==2.5.1
+# Core API
+fastapi
+uvicorn[standard]
+pydantic
+websockets
 
-# OpenTelemetry
-opentelemetry-api==1.24.0
-opentelemetry-sdk==1.24.0
-opentelemetry-exporter-otlp-proto-grpc==1.24.0
-opentelemetry-instrumentation-fastapi==0.45b0
-opentelemetry-instrumentation-requests==0.45b0 
+# In-Memory Data Grid for Conversation History
+pyignite
+
+# Configuration
+pyyaml
+
+# Service Clients
+httpx
+
+# Utilities
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi
+
+# Local Shared Libraries (install in editable mode from project root)
+# These dependencies are on local packages.
+# They are listed here for reference.
+# -e ./shared/q_auth_parser
+# -e ./shared/q_vectorstore_client
+# -e ./shared/q_pulse_client 
