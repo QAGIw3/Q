@@ -41,6 +41,8 @@ from agentQ.app.core.prompts import REFLEXION_PROMPT_TEMPLATE
 from agentQ.devops_agent import setup_devops_agent, DEVOPS_SYSTEM_PROMPT, AGENT_ID as DEVOPS_AGENT_ID, TASK_TOPIC as DEVOPS_TASK_TOPIC
 from agentQ.data_analyst_agent import setup_data_analyst_agent, DATA_ANALYST_SYSTEM_PROMPT, AGENT_ID as DA_AGENT_ID, TASK_TOPIC as DA_TASK_TOPIC
 from agentQ.knowledge_engineer_agent import setup_knowledge_engineer_agent, KNOWLEDGE_ENGINEER_SYSTEM_PROMPT, AGENT_ID as KE_AGENT_ID, TASK_TOPIC as KE_TASK_TOPIC
+from agentQ.predictive_analyst_agent import setup_predictive_analyst_agent, PREDICTIVE_ANALYST_SYSTEM_PROMPT, AGENT_ID as PA_AGENT_ID, TASK_TOPIC as PA_TASK_TOPIC
+from agentQ.docs_agent import setup_docs_agent, DOCS_AGENT_SYSTEM_PROMPT, AGENT_ID as DOCS_AGENT_ID, TASK_TOPIC as DOCS_TASK_TOPIC
 
 # Initialize tracing and logging
 setup_tracing(app=None)
@@ -71,7 +73,7 @@ Example `Action` objects:
 3.  **Memory First:** Before starting a complex task, especially one that feels familiar, use the `search_memory` tool to see if you've already solved a similar problem.
 4.  **Learn from Mistakes:** If a task seems complex or might fail, use the `retrieve_reflexion` tool with the user's prompt as the parameter.
 5.  **Visualize Data:** If the user asks for data that would be best viewed in a table, use the `generate_table` tool.
-6.  **Summarize Your Work:** At the end of a successful conversation, you will be asked to provide a concise summary of the key information and facts for your long-term memory.
+6.  **Summarize Your Work:** At the end of a successful conversation, you will be asked to generate a structured JSON object representing your memory of the task. This memory object should include a `summary`, the `entities` involved, `key_relationships` you discovered, the final `outcome`, the original `full_prompt`, and your `final_answer`. This is your absolute final action before finishing the task.
 
 Here are the tools you have available:
 {tools}
@@ -288,22 +290,46 @@ def react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config,
             
             # --- Memory Creation Step ---
             try:
-                logger.info("Conversation finished. Generating summary for long-term memory.")
-                summarization_prompt = "Based on our conversation, please provide a concise, one-paragraph summary of the key facts, findings, and conclusions. This summary will be saved to your long-term memory. Focus on information that is likely to be useful in the future."
+                logger.info("Conversation finished. Generating structured memory.")
                 
-                # Use the existing history, but add the summarization request
-                summary_request_history = [QPChatMessage(**msg) for msg in history]
-                summary_request_history.append(QPChatMessage(role="system", content=summarization_prompt))
+                # New prompt to ask the LLM for a structured memory object
+                memory_prompt = f"""
+                Based on our entire conversation, generate a structured JSON object for my long-term memory.
+                The JSON object must conform to the following schema:
+                {{
+                    "agent_id": "{prompt_data.get('agent_id')}",
+                    "conversation_id": "{conversation_id}",
+                    "summary": "A concise, one-paragraph summary of the key facts, findings, and conclusions.",
+                    "entities": ["A list of key entities involved (e.g., service names, technologies, people)."],
+                    "key_relationships": {{
+                        "entity_1": ["relationship_1_to_entity_2", "relationship_2_to_entity_3"],
+                        "entity_2": ["relationship_3_to_entity_4"]
+                    }},
+                    "outcome": "The final outcome of the task. Choose from: 'SUCCESSFULLY_RESOLVED', 'FAILED_NEEDS_INFO', 'NO_ACTION_NEEDED'.",
+                    "full_prompt": "{user_prompt}",
+                    "final_answer": "{final_answer}"
+                }}
 
-                summary_request = QPChatRequest(model=llm_config['model'], messages=summary_request_history)
-                summary_response = asyncio.run(qpulse_client.get_chat_completion(summary_request))
-                summary_text = summary_response.choices[0].message.content
+                Conversation History:
+                {json.dumps(history, indent=2)}
+
+                Respond with ONLY the valid JSON object.
+                """
                 
-                if summary_text:
-                    logger.info("Saving conversation summary to memory.", summary=summary_text)
-                    toolbox.execute_tool("save_memory", summary=summary_text)
+                memory_request_messages = [QPChatMessage(role="system", content=memory_prompt)]
+                memory_request = QPChatRequest(model=llm_config['model'], messages=memory_request_messages, temperature=0.2)
+                
+                memory_response = asyncio.run(qpulse_client.get_chat_completion(memory_request))
+                memory_json_str = memory_response.choices[0].message.content
+                
+                # The LLM should return a JSON string, which we parse into a dict
+                memory_data = json.loads(memory_json_str)
+                
+                if memory_data:
+                    logger.info("Saving structured memory.", memory_id=memory_data.get('memory_id'))
+                    toolbox.execute_tool("save_memory", memory=memory_data)
             except Exception as e:
-                logger.error("Failed to generate and save conversation summary.", error=str(e), exc_info=True)
+                logger.error("Failed to generate and save structured memory.", error=str(e), exc_info=True)
 
             context_manager.append_to_history(conversation_id, history, scratchpad)
             return final_answer
@@ -442,6 +468,16 @@ def run_agent():
         task_topic = KE_TASK_TOPIC
         system_prompt = KNOWLEDGE_ENGINEER_SYSTEM_PROMPT
         toolbox, context_manager = setup_knowledge_engineer_agent(config)
+    elif personality == "predictive_analyst":
+        agent_id = PA_AGENT_ID
+        task_topic = PA_TASK_TOPIC
+        system_prompt = PREDICTIVE_ANALYST_SYSTEM_PROMPT
+        toolbox, context_manager = setup_predictive_analyst_agent(config)
+    elif personality == "docs_agent":
+        agent_id = DOCS_AGENT_ID
+        task_topic = DOCS_TASK_TOPIC
+        system_prompt = DOCS_AGENT_SYSTEM_PROMPT
+        toolbox, context_manager = setup_docs_agent(config)
     else: # Default personality
         agent_id = f"agentq-default-{uuid.uuid4()}"
         task_topic = f"persistent://public/default/q.agentq.tasks.{agent_id}"

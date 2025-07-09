@@ -142,6 +142,67 @@ PREDEFINED_FLOWS: Dict[str, Dict[str, Any]] = {
                 }
             }
         ]
+    },
+    "propose_code_fix": {
+        "id": "propose_code_fix",
+        "name": "Propose a Code Fix via Pull Request",
+        "description": "Creates a new branch, commits a single file change, and opens a pull request for review. Ideal for agent-driven code remediation.",
+        "steps": [
+            {
+                "name": "Create New Branch",
+                "connector_id": "github",
+                "action_id": "create_branch",
+                "credential_id": "github-pat",
+                "configuration": {
+                    "repo": "{{ repo }}",
+                    "new_branch_name": "{{ new_branch_name }}",
+                    "source_branch_name": "{{ source_branch_name }}"
+                }
+            },
+            {
+                "name": "Commit File Change",
+                "connector_id": "github",
+                "action_id": "create_commit",
+                "credential_id": "github-pat",
+                "configuration": {
+                    "repo": "{{ repo }}",
+                    "branch_name": "{{ new_branch_name }}",
+                    "file_path": "{{ file_path }}",
+                    "new_content": "{{ new_content }}",
+                    "commit_message": "{{ commit_message }}"
+                }
+            },
+            {
+                "name": "Create Pull Request",
+                "connector_id": "github",
+                "action_id": "create_pull_request",
+                "credential_id": "github-pat",
+                "configuration": {
+                    "repo": "{{ repo }}",
+                    "head_branch": "{{ new_branch_name }}",
+                    "base_branch": "{{ source_branch_name }}",
+                    "title": "{{ pr_title }}",
+                    "body": "{{ pr_body }}"
+                }
+            }
+        ]
+    },
+    "get_pr_diff": {
+        "id": "get_pr_diff",
+        "name": "Get PR Diff",
+        "description": "Fetches the raw diff of a pull request.",
+        "steps": [
+            {
+                "name": "Get PR Diff",
+                "connector_id": "github",
+                "action_id": "get_pr_diff",
+                "credential_id": "github-pat",
+                "configuration": {
+                    "repo": "{{ repo }}",
+                    "pr_number": "{{ pr_number }}"
+                }
+            }
+        ]
     }
 }
 

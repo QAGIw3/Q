@@ -175,6 +175,42 @@ def event_to_graph_ops(event: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "from_vertex_label": "RCAReport", "to_vertex_label": "Workflow"
             })
 
+    # --- Logic for 'memory.saved' events ---
+    elif event_type == "memory.saved":
+        memory_data = payload
+        mem_id = memory_data.get("memory_id")
+        
+        if mem_id:
+            # Create the Memory vertex itself
+            ops.append({
+                "operation": "upsert_vertex",
+                "label": "Memory",
+                "properties": {
+                    "uid": mem_id,
+                    "summary": memory_data.get("summary"),
+                    "outcome": memory_data.get("outcome"),
+                    "agent_id": memory_data.get("agent_id"),
+                    "conversation_id": memory_data.get("conversation_id"),
+                    "timestamp": memory_data.get("timestamp")
+                }
+            })
+            
+            # Link the memory to the entities it mentions
+            entities = memory_data.get("entities", [])
+            for entity in entities:
+                # Assume entities are simple strings for now, like service names
+                # A more robust system might parse a prefix, e.g., 'service:my-app'
+                ops.append({
+                    "operation": "upsert_vertex",
+                    "label": "Entity", # Using a generic 'Entity' label for now
+                    "properties": {"uid": entity, "name": entity}
+                })
+                ops.append({
+                    "operation": "upsert_edge", "label": "CONTAINS",
+                    "from_vertex_id": mem_id, "to_vertex_id": entity,
+                    "from_vertex_label": "Memory", "to_vertex_label": "Entity"
+                })
+
     return ops
 
 

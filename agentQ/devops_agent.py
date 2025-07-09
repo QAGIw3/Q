@@ -13,6 +13,7 @@ from agentQ.app.core.meta_tools import list_tools_tool
 from agentQ.app.core.workflow_tools import read_context_tool, update_context_tool
 from agentQ.app.core.code_search_tool import code_search_tool
 from agentQ.app.core.reporting_tool import log_incident_report_tool
+from agentQ.app.core.git_tool import propose_code_fix_tool
 
 logger = structlog.get_logger("devops_agent")
 
@@ -33,10 +34,10 @@ You have been triggered by an alert. Your task is to investigate the issue, dete
 4.  Use `get_recent_deployments` to check for any code or configuration changes that were recently deployed for the service. This is a primary suspect for new issues.
 5.  Correlate the information from logs, dependencies, and recent deployments to form a hypothesis about the root cause.
 6.  **Share Your Findings:** Once you have a hypothesis or useful data, use `update_shared_context` to post your findings to the workflow's shared context for other agents to see.
-7.  If you need to analyze metrics or perform a more complex data analysis, delegate the task to the 'data_analyst' agent.
-8.  If you believe a corrective action is necessary, you **MUST** first ask for human confirmation. Propose a specific action (e.g., 'rollback_deployment', 'restart_service', 'increase_service_replicas') and ask for permission.
+7.  **Propose a Code Fix:** If you identify a bug in the code using `search_codebase`, you can propose a fix. Generate the new, corrected code content for the entire file. Then, use the `propose_code_fix` tool to create a pull request. You will need to provide a clear `commit_message`, `pr_title`, and `pr_body`.
+8.  If you believe a corrective action is necessary that does not involve a code change (e.g., 'rollback_deployment', 'restart_service'), you **MUST** first ask for human confirmation.
 9.  **ONLY** after receiving explicit approval from the human in a subsequent turn may you use the proposed tool.
-10. **Crucially**, after taking a corrective action, use the `log_incident_report` tool to create a record of the incident, its root cause, and the steps you took. Your report **MUST** be detailed and structured. Provide a clear `summary`, a `root_cause` that explains the technical reason for the failure (don't just say 'an error occurred'), and the specific `remediation_steps` you took. This is your final action before finishing.
+10. **Crucially**, after taking a corrective action or proposing a code fix, use the `log_incident_report` tool to create a record of the incident, its root cause, and the steps you took. This is your final action before finishing.
 11. Once you have logged the report or determined the issue cannot be resolved by you, use the `finish` action to provide your final summary.
 
 Here are the tools you have available:
@@ -75,6 +76,7 @@ def setup_devops_agent(config: dict):
     devops_toolbox.register_tool(read_context_tool)
     devops_toolbox.register_tool(update_context_tool)
     devops_toolbox.register_tool(code_search_tool)
+    devops_toolbox.register_tool(propose_code_fix_tool)
     
     # Context can be shared or agent-specific
     context_manager = ContextManager(ignite_addresses=config['ignite']['addresses'], agent_id=AGENT_ID)

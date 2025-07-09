@@ -1,0 +1,6 @@
+# Spark job dependencies
+pyspark==3.4.1
+delta-spark==2.4.0
+pyignite==0.5.0
+pandas==1.5.3
+statsmodels==0.14.0
