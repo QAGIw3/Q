@@ -338,25 +338,17 @@ def get_kubernetes_deployment_status(service_name: str, namespace: str = "defaul
                 "conditions": [c.message for c in pod.status.conditions] if pod.status.conditions else []
             })
             
-        # 3. Get recent events for the deployment and its pods
-        field_selector_base = f"involvedObject.namespace={namespace}"
-        deployment_uid = deployment.metadata.uid
-        pod_uids = [p.metadata.uid for p in pod_list.items]
-        
-        event_selectors = [f"involvedObject.uid={deployment_uid}"] + [f"involvedObject.uid={uid}" for uid in pod_uids]
-        
+        # 3. Get recent events for the deployment
         events = []
-        # Query events for deployment and each pod
-        event_list = k8s_core_v1.list_namespaced_event(
-            namespace=namespace, 
-            field_selector=f"involvedObject.kind=Deployment,involvedObject.name={service_name}"
-        )
+        field_selector = f"involvedObject.kind=Deployment,involvedObject.name={service_name},involvedObject.namespace={namespace}"
+        event_list = k8s_core_v1.list_event_for_all_namespaces(field_selector=field_selector, limit=20)
+        
         for event in event_list.items:
              events.append({
                 "reason": event.reason,
                 "message": event.message,
                 "type": event.type,
-                "timestamp": event.last_timestamp.isoformat() if event.last_timestamp else event.event_time.isoformat()
+                "timestamp": event.last_timestamp.isoformat() if event.last_timestamp else ""
             })
 
         return json.dumps({
@@ -371,6 +363,37 @@ def get_kubernetes_deployment_status(service_name: str, namespace: str = "defaul
     except Exception as e:
         logger.error(f"Unexpected error while getting deployment status: {e}", exc_info=True)
         return f"Error: An unexpected error occurred while getting deployment status: {e}"
+
+
+def scale_deployment(service_name: str, replicas: int, namespace: str = "default") -> str:
+    """
+    Scales a Kubernetes deployment to a specific number of replicas.
+
+    Args:
+        service_name (str): The name of the deployment to scale.
+        replicas (int): The desired number of replicas.
+        namespace (str): The Kubernetes namespace.
+
+    Returns:
+        A string confirming the action or an error message.
+    """
+    if not k8s_apps_v1:
+        return "Error: Kubernetes client is not configured."
+    
+    logger.info(f"DevOps Tool: Scaling deployment '{service_name}' to {replicas} replicas in namespace '{namespace}'.")
+    try:
+        k8s_apps_v1.patch_namespaced_deployment_scale(
+            name=service_name,
+            namespace=namespace,
+            body={"spec": {"replicas": replicas}}
+        )
+        return f"Successfully scaled deployment '{service_name}' to {replicas} replicas."
+    except client.ApiException as e:
+        logger.error(f"Kubernetes API error while scaling deployment: {e}", exc_info=True)
+        return f"Error: Failed to scale deployment. Kubernetes API error: {e.body}"
+    except Exception as e:
+        logger.error(f"Unexpected error while scaling deployment: {e}", exc_info=True)
+        return f"Error: An unexpected error occurred during scaling: {e}"
 
 
 # --- Tool Registration ---
@@ -415,4 +438,10 @@ get_deployment_status_tool = Tool(
     name="get_kubernetes_deployment_status",
     description="Provides a comprehensive status report for a Kubernetes deployment, including deployment status, pod details, and recent events.",
     func=get_kubernetes_deployment_status
+) 
+
+scale_deployment_tool = Tool(
+    name="scale_deployment",
+    description="Scales a Kubernetes deployment to a specific number of replicas.",
+    func=scale_deployment
 ) 

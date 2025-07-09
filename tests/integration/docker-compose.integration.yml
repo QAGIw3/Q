@@ -1,0 +1,33 @@
+# tests/integration/docker-compose.integration.yml
+version: '3.8'
+
+services:
+  authq:
+    build:
+      context: ../../AuthQ
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8000" # Expose AuthQ on port 8003
+    environment:
+      # These would be for a test-specific Keycloak instance
+      KEYCLOAK_SERVER_URL: "http://keycloak:8080/auth"
+      KEYCLOAK_REALM_NAME: "QPlatformRealm"
+      KEYCLOAK_CLIENT_ID: "managerq-client"
+      KEYCLOAK_CLIENT_SECRET: "a-secret"
+      KEYCLOAK_ADMIN_USERNAME: "admin"
+      KEYCLOAK_ADMIN_PASSWORD: "password"
+    # depends_on:
+    #   - keycloak # In a real test, we'd have a Keycloak service here
+
+  managerq:
+    build:
+      context: ../../managerQ
+      dockerfile: Dockerfile
+    ports:
+      - "8004:8000" # Expose managerQ on port 8004
+    environment:
+      # Point managerQ to the authq service
+      AUTHQ_API_URL: "http://authq:8000"
+      # Other dependencies would be mocked or provided here
+    depends_on:
+      - authq 

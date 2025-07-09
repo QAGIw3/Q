@@ -33,6 +33,7 @@ export interface SearchResponse {
     ai_summary: string | null;
     vector_results: VectorStoreResult[];
     knowledge_graph_result: KnowledgeGraphResult | null;
+    model_version?: string;
 }
 
 export interface FeedbackEvent {
@@ -41,6 +42,7 @@ export interface FeedbackEvent {
     score: number;
     prompt?: string;
     feedback_text?: string;
+    model_version?: string;
 }
 
 export interface UserCreate {

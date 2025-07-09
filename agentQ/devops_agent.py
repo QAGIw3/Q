@@ -5,7 +5,11 @@ import structlog
 
 from agentQ.app.core.toolbox import Toolbox, Tool
 from agentQ.app.core.context import ContextManager
-from agentQ.app.core.devops_tools import get_service_logs_tool, get_service_dependencies_tool, rollback_deployment_tool, get_recent_deployments_tool, restart_service_tool, increase_replicas_tool, list_pods_tool
+from agentQ.app.core.devops_tools import (
+    get_service_dependencies_tool, get_recent_deployments_tool,
+    restart_service_tool, list_pods_tool, get_deployment_status_tool,
+    scale_deployment_tool
+)
 # We can also give it general-purpose tools
 from agentQ.app.core.human_tool import human_tool
 from agentQ.app.core.integrationhub_tool import integrationhub_tool
@@ -66,13 +70,12 @@ def setup_devops_agent(config: dict, vault_client: VaultClient):
     # Pass the service URLs and vault client to the tools that need them
     tool_config = {**config['services'], 'vault_client': vault_client}
 
-    devops_toolbox.register_tool(Tool(name=get_service_logs_tool.name, description=get_service_logs_tool.description, func=get_service_logs_tool.func, config=tool_config))
     devops_toolbox.register_tool(Tool(name=get_service_dependencies_tool.name, description=get_service_dependencies_tool.description, func=get_service_dependencies_tool.func, config=tool_config))
     devops_toolbox.register_tool(Tool(name=get_recent_deployments_tool.name, description=get_recent_deployments_tool.description, func=get_recent_deployments_tool.func, config=tool_config))
-    devops_toolbox.register_tool(Tool(name=rollback_deployment_tool.name, description=rollback_deployment_tool.description, func=rollback_deployment_tool.func, config=tool_config))
     devops_toolbox.register_tool(Tool(name=restart_service_tool.name, description=restart_service_tool.description, func=restart_service_tool.func, config=tool_config))
-    devops_toolbox.register_tool(Tool(name=increase_replicas_tool.name, description=increase_replicas_tool.description, func=increase_replicas_tool.func, config=tool_config))
     devops_toolbox.register_tool(Tool(name=list_pods_tool.name, description=list_pods_tool.description, func=list_pods_tool.func, config=tool_config))
+    devops_toolbox.register_tool(Tool(name=get_deployment_status_tool.name, description=get_deployment_status_tool.description, func=get_deployment_status_tool.func, config=tool_config))
+    devops_toolbox.register_tool(Tool(name=scale_deployment_tool.name, description=scale_deployment_tool.description, func=scale_deployment_tool.func, config=tool_config))
     devops_toolbox.register_tool(Tool(name=log_incident_report_tool.name, description=log_incident_report_tool.description, func=log_incident_report_tool.func, config=tool_config))
     
     # General tools

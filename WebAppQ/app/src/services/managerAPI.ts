@@ -82,6 +82,44 @@ export const cognitiveSearch = async (searchQuery: SearchQuery): Promise<SearchR
     return response.json();
 };
 
+export const respondToApproval = async (workflowId: string, taskId: string, approved: boolean): Promise<void> => {
+    const response = await fetch(`${API_BASE_URL}/workflows/${workflowId}/tasks/${taskId}/respond`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ approved }),
+    });
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to respond to approval');
+    }
+};
+
+export const knowledgeGraphQuery = async (query: string): Promise<any> => {
+    const response = await fetch(`${API_BASE_URL}/search/kg-query`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ query }),
+    });
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to perform knowledge graph query');
+    }
+    return response.json();
+};
+
+export const getNodeNeighbors = async (nodeId: string): Promise<any> => {
+    const response = await fetch(`${API_BASE_URL}/search/kg-neighbors`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ node_id: nodeId }),
+    });
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to fetch node neighbors');
+    }
+    return response.json();
+};
+
 // --- WebSocket Management ---
 
 let socketClient: W3CWebSocket | null = null;

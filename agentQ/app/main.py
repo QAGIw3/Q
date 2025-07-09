@@ -41,12 +41,21 @@ from agentQ.app.core.airflow_tool import trigger_dag_tool, get_dag_status_tool
 from agentQ.app.core.delegation_tool import delegation_tool
 from agentQ.app.core.code_search_tool import code_search_tool
 from agentQ.app.core.prompts import REFLEXION_PROMPT_TEMPLATE
+from shared.q_messaging_schemas.schemas import PROMPT_SCHEMA, RESULT_SCHEMA, REGISTRATION_SCHEMA, THOUGHT_SCHEMA
 from agentQ.devops_agent import setup_devops_agent, DEVOPS_SYSTEM_PROMPT, AGENT_ID as DEVOPS_AGENT_ID, TASK_TOPIC as DEVOPS_TASK_TOPIC
 from agentQ.data_analyst_agent import setup_data_analyst_agent, DATA_ANALYST_SYSTEM_PROMPT, AGENT_ID as DA_AGENT_ID, TASK_TOPIC as DA_TASK_TOPIC
 from agentQ.knowledge_engineer_agent import setup_knowledge_engineer_agent, KNOWLEDGE_ENGINEER_SYSTEM_PROMPT, AGENT_ID as KE_AGENT_ID, TASK_TOPIC as KE_TASK_TOPIC
 from agentQ.predictive_analyst_agent import setup_predictive_analyst_agent, PREDICTIVE_ANALYST_SYSTEM_PROMPT, AGENT_ID as PA_AGENT_ID, TASK_TOPIC as PA_TASK_TOPIC
 from agentQ.docs_agent import setup_docs_agent, DOCS_AGENT_SYSTEM_PROMPT, AGENT_ID as DOCS_AGENT_ID, TASK_TOPIC as DOCS_TASK_TOPIC
 from agentQ.reflector_agent import ReflectorAgent
+from agentQ.app.core.knowledgegraph_tool import text_to_gremlin_tool
+from agentQ.app.core.prompts import KNOWLEDGE_GRAPH_PROMPT_TEMPLATE
+from agentQ.knowledge_graph_agent import run_knowledge_graph_agent
+from agentQ.app.core.devops_tools import (
+    get_service_dependencies_tool, get_recent_deployments_tool, restart_service_tool,
+    increase_replicas_tool, list_pods_tool, get_deployment_status_tool,
+    scale_deployment_tool
+)
 
 # --- Reflector Agent ---
 REFLECTOR_AGENT_ID = "agentq-reflector-singleton"
@@ -116,42 +125,7 @@ Begin!
 """
 
 # --- Schemas & Config ---
-PROMPT_SCHEMA = fastavro.parse_schema({
-    "namespace": "q.managerq", "type": "record", "name": "PromptMessage",
-    "fields": [
-        {"name": "id", "type": "string"},
-        {"name": "prompt", "type": "string"},
-        {"name": "model", "type": "string"},
-        {"name": "timestamp", "type": "long"},
-        {"name": "workflow_id", "type": ["null", "string"], "default": None},
-        {"name": "task_id", "type": ["null", "string"], "default": None},
-    ]
-})
-RESULT_SCHEMA = fastavro.parse_schema({
-    "namespace": "q.agentq", "type": "record", "name": "ResultMessage",
-    "fields": [
-        {"name": "id", "type": "string"},
-        {"name": "result", "type": "string"},
-        {"name": "llm_model", "type": "string"},
-        {"name": "prompt", "type": "string"},
-        {"name": "timestamp", "type": "long"},
-        {"name": "workflow_id", "type": ["null", "string"], "default": None},
-        {"name": "task_id", "type": ["null", "string"], "default": None},
-        {"name": "agent_personality", "type": ["null", "string"], "default": None},
-    ]
-})
-REGISTRATION_SCHEMA = fastavro.parse_schema({
-    "namespace": "q.managerq", "type": "record", "name": "AgentRegistration",
-    "fields": [{"name": "agent_id", "type": "string"}, {"name": "task_topic", "type": "string"}]
-})
-THOUGHT_SCHEMA = fastavro.parse_schema({
-    "namespace": "q.agentq", "type": "record", "name": "ThoughtMessage",
-    "fields": [
-        {"name": "conversation_id", "type": "string"},
-        {"name": "thought", "type": "string"},
-        {"name": "timestamp", "type": "long"},
-    ]
-})
+# (Old schema definitions are removed from here)
 
 def load_config_from_vault(vault_client: VaultClient):
     """Loads configuration for the agent service from Vault."""
@@ -247,7 +221,7 @@ def generate_and_save_reflexion(user_prompt: str, scratchpad: list, context_mana
 
 
 @tracer.start_as_current_span("react_loop")
-def react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config, thoughts_producer):
+def react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config, thoughts_producer, system_prompt_override=None):
     """The main ReAct loop for processing a user request."""
     user_prompt = prompt_data.get("prompt")
     conversation_id = prompt_data.get("id") # Assuming prompt_id is the conversation_id
@@ -284,7 +258,19 @@ def react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config,
 
         # 1. Build the prompt for QuantumPulse
         full_prompt_messages = [QPChatMessage(**msg) for msg in history]
-        full_prompt_messages.append(QPChatMessage(role="system", content=SYSTEM_PROMPT.format(tools=toolbox.get_tool_descriptions())))
+        agent_personality = prompt_data.get("agent_personality", "default")
+        
+        # Select toolbox and system prompt based on personality
+        if agent_personality == "knowledge_graph_agent":
+            toolbox = Toolbox()
+            toolbox.register_tool(text_to_gremlin_tool)
+            system_prompt = KNOWLEDGE_GRAPH_PROMPT_TEMPLATE
+        else:
+            # This can be expanded for other specialist agents
+            toolbox = toolbox # Use the passed toolbox
+            system_prompt = system_prompt_override if system_prompt_override else SYSTEM_PROMPT
+
+        full_prompt_messages.append(QPChatMessage(role="system", content=system_prompt.format(tools=toolbox.get_tool_descriptions())))
         
         # 2. Call QuantumPulse
         request = QPChatRequest(model=llm_config['model'], messages=full_prompt_messages)
@@ -581,48 +567,145 @@ def run_agent():
 
             register_with_manager(registration_producer, agent_id, task_topic)
 
-            consumer = pulsar_client.subscribe(task_topic, f"agentq-sub-{agent_id}")
+            # This loop will now need to handle messages from multiple consumers
+            def consumer_loop(consumer, agent_toolbox):
+                while running:
+                    try:
+                        msg = consumer.receive(timeout_millis=1000)
+                        bytes_reader = io.BytesIO(msg.data())
+                        prompt_data = next(fastavro.reader(bytes_reader, PROMPT_SCHEMA), None)
+                        if not prompt_data:
+                            consumer.acknowledge(msg)
+                            continue
 
-            while running:
-                try:
-                    msg = consumer.receive(timeout_millis=1000)
-                    bytes_reader = io.BytesIO(msg.data())
-                    prompt_data = next(fastavro.reader(bytes_reader, PROMPT_SCHEMA), None)
-                    if not prompt_data:
+                        logger.info("Received task", task_id=prompt_data.get("id"), workflow_id=prompt_data.get("workflow_id"))
+                        
+                        if personality == "reflector":
+                            final_result = asyncio.run(reflector_loop(prompt_data, qpulse_client))
+                        else:
+                            final_result = react_loop(prompt_data, context_manager, agent_toolbox, qpulse_client, llm_config, thoughts_producer)
+                        
+                        # Publish the final result
+                        result_message = {
+                            "id": prompt_data.get("id"), 
+                            "result": final_result, 
+                            "llm_model": llm_config.get('model'), 
+                            "prompt": prompt_data.get("prompt"),
+                            "timestamp": int(time.time() * 1000),
+                            "workflow_id": prompt_data.get("workflow_id"),
+                            "task_id": prompt_data.get("task_id"),
+                            "agent_personality": personality
+                        }
+                        buf = io.BytesIO()
+                        fastavro.writer(buf, RESULT_SCHEMA, [result_message])
+                        result_producer.send(buf.getvalue())
+                        logger.info("Published result", task_id=prompt_data.get("id"), workflow_id=prompt_data.get("workflow_id"))
+
                         consumer.acknowledge(msg)
+                    except pulsar.Timeout:
                         continue
+                    except Exception as e:
+                        logger.error("An error occurred in the main loop", error=str(e), exc_info=True)
+                        if 'msg' in locals():
+                            consumer.negative_acknowledge(msg)
+                        time.sleep(5)
 
-                    logger.info("Received task", task_id=prompt_data.get("id"), workflow_id=prompt_data.get("workflow_id"))
-                    
-                    if personality == "reflector":
-                        final_result = asyncio.run(reflector_loop(prompt_data, qpulse_client))
-                    else:
-                        final_result = react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config, thoughts_producer)
-                    
-                    # Publish the final result
-                    result_message = {
-                        "id": prompt_data.get("id"), 
-                        "result": final_result, 
-                        "llm_model": llm_config.get('model'), 
-                        "prompt": prompt_data.get("prompt"),
-                        "timestamp": int(time.time() * 1000),
-                        "workflow_id": prompt_data.get("workflow_id"),
-                        "task_id": prompt_data.get("task_id"),
-                        "agent_personality": personality
-                    }
-                    buf = io.BytesIO()
-                    fastavro.writer(buf, RESULT_SCHEMA, [result_message])
-                    result_producer.send(buf.getvalue())
-                    logger.info("Published result", task_id=prompt_data.get("id"), workflow_id=prompt_data.get("workflow_id"))
+            # Setup for default agent
+            default_toolbox = Toolbox()
+            # Register all default tools
+            default_toolbox.register_tool(Tool(
+                name=vectorstore_tool.name,
+                description=vectorstore_tool.description,
+                func=vectorstore_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(human_tool) # Does not require config
+            default_toolbox.register_tool(Tool(
+                name=integrationhub_tool.name,
+                description=integrationhub_tool.description,
+                func=integrationhub_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(Tool(
+                name=knowledgegraph_tool.name,
+                description=knowledgegraph_tool.description,
+                func=knowledgegraph_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(Tool(
+                name=summarize_activity_tool.name,
+                description=summarize_activity_tool.description,
+                func=summarize_activity_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(Tool(
+                name=find_experts_tool.name,
+                description=find_experts_tool.description,
+                func=find_experts_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(Tool(
+                name=quantumpulse_tool.name,
+                description=quantumpulse_tool.description,
+                func=quantumpulse_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(Tool(
+                name=save_memory_tool.name,
+                description=save_memory_tool.description,
+                func=save_memory_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(Tool(
+                name=search_memory_tool.name,
+                description=search_memory_tool.description,
+                func=search_memory_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(github_tool) # Requires more specific config, handle later
+            default_toolbox.register_tool(generate_table_tool) # Does not require config
+            default_toolbox.register_tool(list_tools_tool)
+            default_toolbox.register_tool(Tool(
+                name=trigger_dag_tool.name,
+                description=trigger_dag_tool.description,
+                func=trigger_dag_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(Tool(
+                name=get_dag_status_tool.name,
+                description=get_dag_status_tool.description,
+                func=get_dag_status_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(Tool(
+                name=delegation_tool.name,
+                description=delegation_tool.description,
+                func=delegation_tool.func,
+                config=services_config
+            ))
+            default_toolbox.register_tool(Tool(
+                name=code_search_tool.name,
+                description=code_search_tool.description,
+                func=code_search_tool.func,
+                config=services_config
+            ))
 
-                    consumer.acknowledge(msg)
-                except pulsar.Timeout:
-                    continue
-                except Exception as e:
-                    logger.error("An error occurred in the main loop", error=str(e), exc_info=True)
-                    if 'msg' in locals():
-                        consumer.negative_acknowledge(msg)
-                    time.sleep(5)
+            default_consumer = pulsar_client.subscribe(task_topic, f"agentq-sub-{agent_id}")
+            threading.Thread(target=consumer_loop, args=(default_consumer, default_toolbox), daemon=True).start()
+
+            # Setup for Knowledge Graph agent
+            kg_task_topic = "persistent://public/default/q.agentq.tasks.knowledge_graph_agent"
+            kg_consumer = pulsar_client.subscribe(kg_task_topic, f"agentq-sub-kg-{agent_id}")
+            register_with_manager(registration_producer, "knowledge_graph_agent", kg_task_topic)
+            
+            # The KG agent has a specialized toolbox
+            kg_toolbox = Toolbox()
+            kg_toolbox.register_tool(text_to_gremlin_tool)
+            threading.Thread(target=consumer_loop, args=(kg_consumer, kg_toolbox), daemon=True).start()
+
+            # Start the new knowledge graph agent
+            threading.Thread(target=run_knowledge_graph_agent, args=(pulsar_client, qpulse_client, llm_config, context_manager), daemon=True).start()
+
 
     except Exception as e:
         logger.critical("A critical error occurred during agent setup", error=str(e), exc_info=True)

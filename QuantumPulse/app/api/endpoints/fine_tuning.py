@@ -11,6 +11,7 @@ from shared.vault_client import VaultClient
 from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 from trl import DPOTrainer
+from app.core.model_manager import model_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -91,7 +92,10 @@ def run_fine_tuning_job(request: FineTuneRequest, job_id: str):
         # 6. Push the final model to the hub
         dpo_trainer.push_model()
         logger.info(f"Fine-tuning job {job_id} completed. Model pushed to {request.new_model_name}.")
-        # Here you might update a database with the job status
+        
+        # 7. Dynamically load the new model into the ModelManager
+        logger.info(f"Attempting to dynamically load new model '{request.new_model_name}'...")
+        model_manager.load_model(request.new_model_name)
         
     except Exception as e:
         logger.error(f"Fine-tuning job {job_id} failed: {e}", exc_info=True)

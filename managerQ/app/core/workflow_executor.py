@@ -263,13 +263,29 @@ class WorkflowExecutor:
         for block in blocks:
             if block.status == TaskStatus.PENDING and set(block.dependencies).issubset(completed_ids):
                 if isinstance(block, WorkflowTask):
-                    self._dispatch_task(block, workflow)
+                    # NEW: Check for task-level condition before dispatching
+                    if block.condition:
+                        eval_context = self._get_evaluation_context(workflow)
+                        try:
+                            template = self._jinja_env.from_string(block.condition)
+                            if template.render(eval_context):
+                                self._dispatch_task(block, workflow)
+                            else:
+                                # If condition is not met, mark the task as cancelled (or a new 'SKIPPED' status)
+                                logger.info(f"Skipping task '{block.task_id}' due to unmet condition.")
+                                workflow_manager.update_task_status(workflow.workflow_id, block.task_id, TaskStatus.CANCELLED, result="Condition not met.")
+                        except Exception as e:
+                            logger.error(f"Failed to evaluate condition for task '{block.task_id}': {e}", exc_info=True)
+                            workflow_manager.update_task_status(workflow.workflow_id, block.task_id, TaskStatus.FAILED, result=f"Condition evaluation failed: {e}")
+                    else:
+                        self._dispatch_task(block, workflow)
                 elif isinstance(block, ConditionalBlock):
                     self._evaluate_conditional(block, workflow)
                 elif isinstance(block, ApprovalBlock):
                     self._handle_approval_block(block, workflow)
             
-            # Recursively process nested blocks if any
+            # This recursive call is problematic and can lead to re-processing.
+            # A better approach would be a single pass. Refactoring this is out of scope for now.
             if hasattr(block, 'tasks') and block.tasks:
                 self._process_blocks(block.tasks, workflow)
 

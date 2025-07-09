@@ -39,6 +39,7 @@ class SearchResponse(BaseModel):
     ai_summary: Optional[str] = Field(None, description="An AI-generated summary of the search results.")
     vector_results: List[VectorStoreResult] = Field(default_factory=list, description="Results from the vector store.")
     knowledge_graph_result: Optional[KnowledgeGraphResult] = Field(None, description="Results from the knowledge graph.")
+    model_version: Optional[str] = Field(None, description="The version of the model that generated the summary.")
 
 
 class TaskStatus(str, Enum):
@@ -56,6 +57,7 @@ class WorkflowTask(BaseModel):
     status: TaskStatus = TaskStatus.PENDING
     dependencies: List[str] = Field(default_factory=list, description="List of task_ids that must be completed before this one can start.")
     result: Optional[str] = None
+    condition: Optional[str] = Field(None, description="A Jinja2 condition to evaluate before dispatching the task.")
 
 # --- NEW: Models for Conditional Logic ---
 
@@ -77,11 +79,10 @@ class ApprovalBlock(BaseModel):
     task_id: str = Field(default_factory=lambda: f"approve_{uuid.uuid4()}")
     type: Literal["approval"] = "approval"
     status: TaskStatus = TaskStatus.PENDING
-    dependencies: List[str] = Field(default_factory=list, description="List of task_ids that must be completed before this approval is requested.")
+    dependencies: List[str] = Field(default_factory=list, description="List of task_ids that must be completed before this one can start.")
     message: str = Field(description="The message to display to the user for approval, e.g., 'Do you approve this action?'")
-    required_role: Optional[str] = Field(None, description="The role required to approve this step, e.g., 'sre'.")
-    # 'result' will store the approval decision: 'approved' or 'rejected'
-    result: Optional[Literal['approved', 'rejected']] = None
+    required_roles: List[str] = Field(default_factory=list, description="A list of roles required to approve this step, e.g., ['sre', 'admin']. If empty, any user can approve.")
+    result: Optional[Literal['approved', 'rejected']] = Field(None, description="The final decision of the approval step.")
 
 # A Union type representing any execution block in the workflow graph.
 TaskBlock = Union[WorkflowTask, ConditionalBlock, ApprovalBlock]

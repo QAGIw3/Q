@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, HTTPException, status, Body, Depends, Query
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
@@ -6,10 +7,12 @@ from managerQ.app.core.workflow_manager import workflow_manager
 from managerQ.app.models import Workflow, TaskStatus, ApprovalBlock, WorkflowStatus
 from managerQ.app.core.goal_manager import goal_manager
 from managerQ.app.core.goal import Goal
+from managerQ.app.core.workflow_executor import workflow_executor
 from shared.q_auth_parser.parser import get_current_user
 from shared.q_auth_parser.models import UserClaims
 from shared.observability.audit import audit_log
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 class ApprovalRequest(BaseModel):
@@ -188,3 +191,46 @@ async def get_workflow_history(workflow_id: str):
     # This is a placeholder. A real implementation would need to store and retrieve a rich history of events.
     # For now, we will return the tasks as the history.
     return workflow.tasks 
+
+class ApprovalResponse(BaseModel):
+    approved: bool
+
+@router.post("/{workflow_id}/tasks/{task_id}/respond", status_code=status.HTTP_200_OK)
+def respond_to_approval_task(
+    workflow_id: str,
+    task_id: str,
+    response: ApprovalResponse,
+    user: UserClaims = Depends(get_current_user)
+):
+    """
+    Allows a user to respond to a pending approval task.
+    """
+    logger.info(f"User '{user.username}' responded to approval task '{task_id}' with decision: {'approved' if response.approved else 'rejected'}")
+    
+    workflow = workflow_manager.get_workflow(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+        
+    task = workflow.get_task(task_id)
+    if not task or not isinstance(task, ApprovalBlock) or task.status != TaskStatus.PENDING_APPROVAL:
+        raise HTTPException(status_code=400, detail="Task is not a pending approval.")
+    
+    # Enforce RBAC for the approval
+    if task.required_roles:
+        user_roles = set(user.roles)
+        if not user_roles.intersection(task.required_roles):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"User does not have one of the required roles: {task.required_roles}"
+            )
+
+    # Update task status and result
+    new_status = TaskStatus.COMPLETED if response.approved else TaskStatus.FAILED
+    result = "approved" if response.approved else "rejected"
+    
+    workflow_manager.update_task_status(workflow_id, task_id, new_status, result)
+    
+    # Trigger the executor to process the next steps
+    workflow_executor.process_workflow(workflow)
+    
+    return {"status": "Response recorded."} 

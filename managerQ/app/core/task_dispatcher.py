@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 import uuid
 from datetime import datetime
 from collections import defaultdict
+import threading
 
 from managerQ.app.core.agent_registry import agent_registry
 
@@ -38,6 +39,10 @@ class TaskDispatcher:
         self._task_topic_prefix = task_topic_prefix
         self._client: Optional[pulsar.Client] = None
         self._producers: Dict[str, pulsar.Producer] = {}
+        # For awaiting results
+        self._result_events: Dict[str, threading.Event] = {}
+        self._results: Dict[str, Any] = {}
+        self._lock = threading.Lock()
         # A dictionary to track the number of pending tasks per agent personality
         self.pending_tasks: Dict[str, int] = defaultdict(int)
 
@@ -94,6 +99,10 @@ class TaskDispatcher:
         
         message_id = task_id or str(uuid.uuid4())
 
+        # Ensure an event is created for this task_id so we can wait for it
+        with self._lock:
+            self._result_events[message_id] = threading.Event()
+
         task_data = {
             "id": message_id,
             "prompt": prompt,
@@ -118,10 +127,33 @@ class TaskDispatcher:
             self.pending_tasks[agent_personality] += 1
             logger.info(f"Dispatched task {task_id} to agent {final_agent_id}. Pending tasks for '{agent_personality}': {self.pending_tasks[agent_personality]}")
 
-            return final_agent_id
+            return message_id
         except Exception as e:
             logger.error(f"Failed to dispatch task to agent {final_agent_id}: {e}", exc_info=True)
             raise
+
+    def set_task_result(self, task_id: str, result: Any):
+        """Called by the ResultListener to provide a result for a completed task."""
+        with self._lock:
+            if task_id in self._result_events:
+                self._results[task_id] = result
+                self._result_events[task_id].set() # Signal that the result is ready
+
+    async def await_task_result(self, task_id: str, timeout: float) -> Any:
+        """Waits for a task result to be available."""
+        event = self._result_events.get(task_id)
+        if not event:
+            raise ValueError("No event found for this task_id. Was it dispatched correctly?")
+
+        event_was_set = event.wait(timeout=timeout)
+        
+        with self._lock:
+            if not event_was_set:
+                raise TimeoutError(f"Timed out waiting for result for task {task_id}")
+            
+            result = self._results.pop(task_id, None)
+            self._result_events.pop(task_id, None)
+            return result
 
     def decrement_pending_tasks(self, agent_personality: str):
         """Decrements the pending task count for a given personality."""

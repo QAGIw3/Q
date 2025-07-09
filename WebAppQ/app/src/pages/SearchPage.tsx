@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { cognitiveSearch } from '../services/managerAPI';
+import { cognitiveSearch, knowledgeGraphQuery } from '../services/managerAPI';
 import { SearchBar } from '../components/Search/SearchBar';
 import { AISummary } from '../components/Search/AISummary';
 import { SemanticResults } from '../components/Search/SemanticResults';
@@ -12,6 +12,8 @@ export const SearchPage: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [currentQuery, setCurrentQuery] = useState<string>("");
+    const [kgQueryResults, setKgQueryResults] = useState<any>(null);
+    const [isKgQueryLoading, setIsKgQueryLoading] = useState(false);
 
     const handleSearch = async (query: string) => {
         if (!query.trim()) return;
@@ -28,6 +30,20 @@ export const SearchPage: React.FC = () => {
             setError(err.message || 'An unknown error occurred.');
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleKgSearch = async (query: string) => {
+        if (!query.trim()) return;
+        setIsKgQueryLoading(true);
+        setKgQueryResults(null);
+        try {
+            const results = await knowledgeGraphQuery(query);
+            setKgQueryResults(results);
+        } catch (err: any) {
+            // Handle error
+        } finally {
+            setIsKgQueryLoading(false);
         }
     };
 
@@ -48,6 +64,7 @@ export const SearchPage: React.FC = () => {
                                 reference_id={results.ai_summary}
                                 context="AISummary"
                                 prompt={currentQuery}
+                                model_version={results.model_version}
                             />
                         )}
                         <SemanticResults results={results.vector_results} />
@@ -57,6 +74,17 @@ export const SearchPage: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            <div style={{ marginTop: '40px' }}>
+                <h2>Natural Language Knowledge Graph Search</h2>
+                <SearchBar onSearch={handleKgSearch} isLoading={isKgQueryLoading} />
+                {isKgQueryLoading && <p>Loading KG results...</p>}
+                {kgQueryResults && (
+                    <pre style={{ background: '#eee', padding: '10px', marginTop: '10px', maxHeight: '300px', overflowY: 'auto' }}>
+                        {JSON.stringify(kgQueryResults, null, 2)}
+                    </pre>
+                )}
+            </div>
         </div>
     );
 }; 

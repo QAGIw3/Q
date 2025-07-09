@@ -75,3 +75,47 @@ store_insight_tool = Tool(
     description="Stores a 'lesson learned' from a completed workflow into the Knowledge Graph to improve future planning.",
     func=store_insight_in_kg
 ) 
+
+# agentQ/app/core/knowledgegraph_tool.py
+import logging
+from agentQ.app.core.toolbox import Tool
+
+logger = logging.getLogger(__name__)
+
+def text_to_gremlin(natural_language_question: str) -> str:
+    """
+    Translates a natural language question into a Gremlin query for the Knowledge Graph.
+    
+    Args:
+        natural_language_question (str): The user's question (e.g., "What services depend on managerQ?").
+        
+    Returns:
+        A Gremlin query string.
+    """
+    logger.info(f"KG Tool: Translating question to Gremlin: '{natural_language_question}'")
+    
+    # This is a placeholder for a sophisticated LLM call.
+    # A real implementation would use a model fine-tuned for Text-to-Gremlin.
+    # For now, we'll use a simple keyword-based approach.
+    
+    question = natural_language_question.lower()
+    
+    # Example 1: "What services depend on managerQ?"
+    if "services depend on" in question:
+        service_name = natural_language_question.split("services depend on")[-1].strip().replace("?", "")
+        return f"g.V().has('Service', 'name', '{service_name}').in('DEPENDS_ON').hasLabel('Service').elementMap()"
+
+    # Example 2: "Show me recent deployments for authq"
+    if "recent deployments for" in question:
+        service_name = natural_language_question.split("recent deployments for")[-1].strip()
+        return f"g.V().has('Service', 'name', '{service_name}').in('DEPLOYED_TO').limit(5).elementMap()"
+
+    # Default fallback query
+    return "g.V().limit(10).elementMap()"
+
+
+text_to_gremlin_tool = Tool(
+    name="text_to_gremlin",
+    description="Translates a natural language question into a Gremlin query.",
+    func=text_to_gremlin
+) 

@@ -1,0 +1,104 @@
+# AgentSandbox/scenarios/auth_and_search_e2e.yaml
+name: "E2E Test: User Registration, Login, and Search"
+description: "A multi-step scenario that tests the full user authentication and core search functionality."
+
+# Define service endpoints. In a real environment, these might be dynamically discovered.
+services:
+  authq: "http://authq:80"
+  managerq: "http://managerq:80"
+
+# A unique identifier for this run to avoid user conflicts.
+run_id: "{{ uuid.uuid4() }}"
+
+steps:
+  - name: "Register a new user"
+    id: "register_user"
+    action: "http_request"
+    params:
+      method: "POST"
+      url: "{{ services.authq }}/api/v1/users/register"
+      json:
+        username: "e2e_user_{{ run_id }}"
+        email: "e2e_user_{{ run_id }}@example.com"
+        password: "a_secure_password_123"
+    assertions:
+      - type: "json_response"
+        path: "username"
+        expected_value: "e2e_user_{{ run_id }}"
+      - type: "status_code"
+        expected_value: 201
+
+  - name: "Log in to get an access token"
+    id: "login"
+    action: "http_request"
+    params:
+      method: "POST"
+      url: "{{ services.authq }}/api/v1/auth/token"
+      json:
+        username: "e2e_user_{{ run_id }}"
+        password: "a_secure_password_123"
+    # Extract the access token from the response to use in subsequent steps
+    outputs:
+      - name: "access_token"
+        from_path: "access_token"
+    assertions:
+      - type: "status_code"
+        expected_value: 200
+      - type: "json_response"
+        path: "token_type"
+        expected_value: "bearer"
+
+  - name: "Perform a cognitive search"
+    id: "cognitive_search"
+    action: "http_request"
+    params:
+      method: "POST"
+      url: "{{ services.managerq }}/v1/search/"
+      headers:
+        Authorization: "Bearer {{ steps.login.outputs.access_token }}"
+      json:
+        query: "What is the Q Platform?"
+    assertions:
+      - type: "status_code"
+        expected_value: 200
+      - type: "json_response"
+        path: "ai_summary"
+        # We just check that the summary is not empty, as the content can vary.
+        is_not_empty: true
+      - type: "json_response"
+        path: "vector_results"
+        is_not_empty: true 
+
+  - name: "Perform a Natural Language KG Search"
+    id: "kg_search"
+    action: "http_request"
+    params:
+      method: "POST"
+      url: "{{ services.managerq }}/v1/search/kg-query"
+      headers:
+        Authorization: "Bearer {{ steps.login.outputs.access_token }}"
+      json:
+        query: "What services depend on managerQ?"
+    assertions:
+      - type: "status_code"
+        expected_value: 200
+      - type: "json_response"
+        # A simple check to see if we got some graph data back
+        path: "nodes" 
+        is_not_empty: true
+
+  - name: "Trigger an AIOps Workflow"
+    id: "trigger_aiops"
+    action: "http_request"
+    # This step is a placeholder. It would require a mock Flink job
+    # to send a Pulsar message. The sandbox runner would need a 'pulsar_publish' action.
+    # For now, this demonstrates the intent.
+    params:
+      method: "POST"
+      url: "http://mock-event-source/anomaly" # This endpoint doesn't exist
+      json:
+        event_type: "anomaly.detected.error_rate"
+        service_name: "test-service"
+    assertions:
+      - type: "status_code"
+        expected_value: 202 # Assuming it's accepted 

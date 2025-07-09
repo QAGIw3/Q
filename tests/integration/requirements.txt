@@ -1,0 +1,5 @@
+# tests/integration/requirements.txt
+pytest
+docker-compose
+tenacity
+httpx 

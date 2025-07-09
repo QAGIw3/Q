@@ -113,10 +113,14 @@ class ResultListener:
         if not result_data:
             return
 
-        task_id = result_data.get("task_id")
+        task_id = result_data.get("task_id") or result_data.get("id")
         workflow_id = result_data.get("workflow_id")
         result_text = result_data.get("result")
         agent_personality = result_data.get("agent_personality")
+
+        # Set the result for any part of the system that might be awaiting it
+        if task_id:
+            task_dispatcher.set_task_result(task_id, result_text)
 
         # Decrement pending task count for the personality
         if agent_personality:

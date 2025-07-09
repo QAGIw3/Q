@@ -8,7 +8,7 @@ import uvicorn
 import logging
 import structlog
 
-from app.api import chat, feedback
+from app.api import chat, feedback, registry
 from app.core.config import config
 from app.services.ignite_client import ignite_client
 from app.services.h2m_pulsar import h2m_pulsar_client
@@ -52,6 +52,7 @@ async def shutdown_event():
 # Include the API routers
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["Feedback"])
+app.include_router(registry.router, prefix="/api/v1/registry", tags=["Model Registry"])
 
 
 @app.get("/health", tags=["Health"])

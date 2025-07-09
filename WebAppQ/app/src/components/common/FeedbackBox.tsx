@@ -6,15 +6,16 @@ interface FeedbackBoxProps {
     reference_id: string; // ID of the item being rated (e.g., summary ID, message ID)
     context: string; // The context of the feedback (e.g., "AISummary")
     prompt?: string;
+    model_version?: string;
 }
 
-export const FeedbackBox: React.FC<FeedbackBoxProps> = ({ reference_id, context, prompt }) => {
+export const FeedbackBox: React.FC<FeedbackBoxProps> = ({ reference_id, context, prompt, model_version }) => {
     const [submitted, setSubmitted] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
 
     const handleFeedback = async (score: number) => {
         try {
-            await submitFeedback({ reference_id, context, score, prompt });
+            await submitFeedback({ reference_id, context, score, prompt, model_version });
             setSubmitted(true);
             setError(null);
         } catch (err: any) {

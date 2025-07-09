@@ -1,19 +1,8 @@
 # AgentSandbox/requirements.txt
-fastapi==0.110.0
-uvicorn[standard]==0.29.0
-httpx==0.27.0
-PyYAML==6.0.1
-apache-pulsar-client==3.5.0
-fastavro==1.9.4
-
-# Observability
-prometheus-client
+fastapi
+uvicorn
+pyyaml
+httpx
 structlog
- 
-# Shared Libraries
-pyyaml
--e ./shared/q_auth_parser
- 
-# Shared Libraries
-pyyaml
--e ./shared/q_auth_parser
+python-json-logger
+dpath

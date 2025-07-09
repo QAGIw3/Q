@@ -1,4 +1,4 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState, useEffect } from 'react';
 import { BrowserRouter as Router, Route, Routes, Link, Navigate, useLocation } from 'react-router-dom';
 import { Box, Typography, AppBar, Toolbar, Button, CircularProgress, Container } from '@mui/material';
 import { AuthContext, AuthProvider } from './AuthContext';
@@ -7,6 +7,9 @@ import { WorkflowsPage } from './pages/WorkflowsPage';
 import { WorkflowDetailPage } from './pages/WorkflowDetailPage';
 import { SearchPage } from './pages/SearchPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { ApprovalsPage } from './pages/ApprovalsPage';
+import { ToastNotification } from './components/common/ToastNotification';
+import { connectToDashboardSocket, disconnectFromDashboardSocket } from './services/managerAPI';
 
 function Home() {
   const authContext = useContext(AuthContext);
@@ -30,6 +33,29 @@ function Home() {
 
 function App() {
   const authContext = useContext(AuthContext);
+  const [toast, setToast] = useState<{ open: boolean, message: string, title: string }>({ open: false, message: '', title: '' });
+
+  useEffect(() => {
+      if (authContext?.isAuthenticated) {
+          const handleSocketMessage = (data: any) => {
+              if (data.event_type === "APPROVAL_REQUIRED") {
+                  setToast({
+                      open: true,
+                      title: "Action Required",
+                      message: `An approval is waiting for you: ${data.data.message}`
+                  });
+              }
+          };
+          connectToDashboardSocket(handleSocketMessage);
+      }
+      return () => {
+          disconnectFromDashboardSocket();
+      };
+  }, [authContext]);
+
+  const handleCloseToast = () => {
+      setToast({ ...toast, open: false });
+  };
 
   if (!authContext?.isAuthenticated) {
     // This is shown while the Keycloak adapter initializes.
@@ -45,6 +71,12 @@ function App() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: '#f5f5f5' }}>
+      <ToastNotification
+          open={toast.open}
+          onClose={handleCloseToast}
+          title={toast.title}
+          message={toast.message}
+      />
       <AppBar position="static">
         <Toolbar>
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
@@ -53,12 +85,14 @@ function App() {
           <Button color="inherit" component={Link} to="/chat">Chat</Button>
           <Button color="inherit" component={Link} to="/workflows">Workflows</Button>
           <Button color="inherit" component={Link} to="/search">Search</Button>
+          <Button color="inherit" component={Link} to="/approvals">Approvals</Button>
           <Button color="inherit" onClick={() => authContext.logout && authContext.logout()}>Logout</Button>
         </Toolbar>
       </AppBar>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/approvals" element={<RequireAuth><ApprovalsPage /></RequireAuth>} />
         <Route path="/chat" element={<RequireAuth><Chat /></RequireAuth>} />
         <Route path="/workflows" element={<RequireAuth><WorkflowsPage /></RequireAuth>} />
         <Route path="/workflows/:workflowId" element={<RequireAuth><WorkflowDetailPage /></RequireAuth>} />

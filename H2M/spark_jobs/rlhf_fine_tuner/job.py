@@ -13,6 +13,8 @@ QPULSE_API_URL = os.getenv("QPULSE_API_URL", "http://quantumpulse:8000")
 QPULSE_API_TOKEN = os.getenv("QPULSE_API_TOKEN", "dummy-token-for-now")
 BASE_MODEL = "q-alpha-v3-summarizer" # The base model we are fine-tuning
 
+H2M_API_URL = os.getenv("H2M_API_URL", "http://h2m-service:80")
+
 def create_spark_session() -> SparkSession:
     """Initializes and returns a Spark session configured for Pulsar streaming."""
     return SparkSession.builder \
@@ -55,6 +57,7 @@ def process_batch(batch_df, batch_id):
     new_model_name = f"{BASE_MODEL}-dpo-{datetime.utcnow().strftime('%Y%m%d%H%M')}"
     
     try:
+        # 1. Trigger the fine-tuning job in QuantumPulse
         headers = {"Authorization": f"Bearer {QPULSE_API_TOKEN}"}
         response = httpx.post(
             f"{QPULSE_API_URL}/v1/fine-tune/",
@@ -68,10 +71,24 @@ def process_batch(batch_df, batch_id):
         )
         response.raise_for_status()
         print(f"Successfully submitted fine-tuning job. Response: {response.json()}")
+
+        # 2. Register the new model in the H2M Model Registry
+        print(f"Registering new model '{new_model_name}' in the registry.")
+        registry_response = httpx.post(
+            f"{H2M_API_URL}/api/v1/registry/register",
+            json={
+                "model_name": new_model_name,
+                "base_model": BASE_MODEL,
+                "tags": ["summarizer", "rlhf", "dpo"]
+            }
+        )
+        registry_response.raise_for_status()
+        print("Model successfully registered.")
+
     except httpx.HTTPStatusError as e:
-        print(f"Error submitting fine-tuning job: {e.response.text}")
+        print(f"Error during API call: {e.response.text}")
     except Exception as e:
-        print(f"An unexpected error occurred during API call: {e}")
+        print(f"An unexpected error occurred: {e}")
 
 def run_fine_tuning_job():
     """Main job logic for streaming from Pulsar."""

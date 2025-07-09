@@ -42,7 +42,31 @@ tasks:
       Log Analysis Findings:
       {{ tasks.analyze_logs.result }}
 
-      Provide a concise summary of the likely root cause and suggest potential
-      remediation steps. Structure your output as a markdown report.
+      Provide a concise summary of the likely root cause and suggest a potential
+      remediation step, such as 'restart_service'. Structure your output as a markdown report.
     dependencies:
-      - "analyze_logs" 
+      - "analyze_logs"
+
+  - task_id: "request_remediation_approval"
+    type: "approval"
+    message: >
+      The AIOps agent recommends restarting the '{{ service_name }}' service. If that fails, the next step is to scale up the deployment. Please approve or reject this plan.
+    dependencies:
+      - "synthesize_report"
+    required_roles: ["sre", "lead_dev"]
+
+  - task_id: "remediate_issue_restart"
+    type: "task"
+    agent_personality: "devops_agent"
+    prompt: "Execute the 'restart_service' tool for '{{ service_name }}'."
+    dependencies:
+      - "request_remediation_approval"
+    condition: "{{ tasks.request_remediation_approval.result == 'approved' }}"
+
+  - task_id: "remediate_issue_scale"
+    type: "task"
+    agent_personality: "devops_agent"
+    prompt: "The restart failed. As per the approved plan, execute the 'scale_deployment' tool for '{{ service_name }}' to 3 replicas."
+    dependencies:
+      - "remediate_issue_restart"
+    condition: "{{ tasks.remediate_issue_restart.status == 'FAILED' }}" 

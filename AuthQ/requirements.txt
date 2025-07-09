@@ -7,3 +7,8 @@ pydantic
 # Shared Libraries
 pyyaml
 -e ./shared/q_auth_parser
+
+# Testing
+pytest
+pytest-mock
+pact-python

@@ -3,11 +3,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from openai import OpenAI
 from fastapi.responses import StreamingResponse
 import json
+import uuid
+import time
 
-from app.models.chat import ChatRequest, ChatResponse
+from app.models.chat import ChatRequest, ChatResponse, ChatChoice, ChatMessage, ChatUsage
 from shared.q_auth_parser.parser import get_current_user
 from shared.q_auth_parser.models import UserClaims
-from shared.vault_client import VaultClient
+from app.core.model_manager import model_manager
+from shared.q_h2m_client.client import h2m_client
+import random
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -51,53 +55,67 @@ async def sse_generator(openai_stream):
 @router.post("/completions", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 async def create_chat_completion(
     request: ChatRequest,
-    user: UserClaims = Depends(get_current_user),
-    openai_client: OpenAI = Depends(get_openai_client)
+    user: UserClaims = Depends(get_current_user)
 ):
     """
     Provides a synchronous, request/response endpoint for chat completions.
-    This acts as a centralized gateway to the underlying LLM.
-    If `stream` is set to true, it returns a Server-Sent Events stream.
+    This acts as a centralized gateway to locally hosted, fine-tuned models.
+    It performs A/B testing if multiple active models are found.
     """
-    if not openai_client:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The OpenAI client is not configured or failed to initialize."
-        )
-
-    logger.info(f"Received chat completion request from user '{user.username}' for model '{request.model}'. Stream: {request.stream}")
+    logger.info(f"Received chat completion request from user '{user.username}' for base model '{request.model}'.")
 
     try:
-        messages = [msg.dict() for msg in request.messages]
+        # 1. Get active models from the registry
+        active_models = await h2m_client.get_active_models(base_model=request.model)
+        
+        if not active_models:
+            # Fallback to the base model if no active fine-tuned models are found
+            selected_model_name = request.model
+        else:
+            # 2. A/B Testing: Simple random choice for now
+            selected_model_name = random.choice([m['metadata']['model_name'] for m in active_models])
+        
+        logger.info(f"Routing request to model: '{selected_model_name}'")
 
-        # If streaming is requested, return a StreamingResponse
-        if request.stream:
-            stream = openai_client.chat.completions.create(
-                model=request.model,
-                messages=messages,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens,
-                stream=True
+        # 3. Get the model and tokenizer from the manager
+        model, tokenizer = model_manager.get_model_and_tokenizer(selected_model_name)
+
+        if not model or not tokenizer:
+            raise HTTPException(status_code=503, detail=f"Model '{selected_model_name}' could not be loaded.")
+
+        # 4. Generate the completion
+        # Note: This is a simplified generation process.
+        # A real implementation would handle tokenization, attention masks, etc. more robustly.
+        inputs = tokenizer(request.messages[-1].content, return_tensors="pt")
+        outputs = model.generate(**inputs, max_new_tokens=request.max_tokens)
+        completion_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # 5. Format the response to match the expected ChatResponse model
+        response = ChatResponse(
+            id=f"cmpl-{uuid.uuid4()}",
+            object="chat.completion",
+            created=int(time.time()),
+            model=selected_model_name,
+            choices=[
+                ChatChoice(
+                    index=0,
+                    message=ChatMessage(role="assistant", content=completion_text),
+                    finish_reason="stop"
+                )
+            ],
+            usage=ChatUsage(
+                prompt_tokens=len(inputs.input_ids[0]),
+                completion_tokens=len(outputs[0]),
+                total_tokens=len(inputs.input_ids[0]) + len(outputs[0])
             )
-            return StreamingResponse(sse_generator(stream), media_type="text/event-stream")
-
-        # Otherwise, handle as a normal synchronous request
-        completion = openai_client.chat.completions.create(
-            model=request.model,
-            messages=messages,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            stream=False
         )
         
-        response = ChatResponse(**completion.dict())
-        
-        logger.info(f"Successfully generated chat completion {response.id} for user '{user.username}'.")
+        logger.info(f"Successfully generated chat completion from model '{selected_model_name}'.")
         return response
 
     except Exception as e:
-        logger.error(f"Error calling OpenAI API: {e}", exc_info=True)
+        logger.error(f"Error during local model inference: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An unexpected error occurred while communicating with the LLM provider: {e}"
+            detail=f"An unexpected error occurred during inference: {e}"
         ) 
