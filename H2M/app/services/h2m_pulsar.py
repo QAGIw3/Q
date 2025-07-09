@@ -23,8 +23,10 @@ class H2MPulsarClient:
         self.reply_topic_prefix = pulsar_config.topics.reply_prefix
         self.human_response_topic = pulsar_config.topics.human_response_topic
         self.human_feedback_topic = pulsar_config.topics.human_feedback_topic
+        self.platform_events_topic = pulsar_config.topics.get('platform_events', 'persistent://public/default/platform-events') # Add platform events topic
         self._response_producer: Optional[pulsar.Producer] = None
         self._feedback_producer: Optional[pulsar.Producer] = None
+        self._platform_events_producer: Optional[pulsar.Producer] = None
 
     def start_producers(self):
         """Initializes all required producers."""
@@ -35,6 +37,10 @@ class H2MPulsarClient:
         if self._feedback_producer is None:
             self._feedback_producer = self.client.create_producer(self.human_feedback_topic)
             logger.info(f"Created producer for human feedback on topic: {self.human_feedback_topic}")
+        
+        if self._platform_events_producer is None:
+            self._platform_events_producer = self.client.create_producer(self.platform_events_topic)
+            logger.info(f"Created producer for platform events on topic: {self.platform_events_topic}")
 
     async def send_human_response(self, conversation_id: str, response_text: str):
         """Sends a human's response back to the agent."""
@@ -58,6 +64,18 @@ class H2MPulsarClient:
         
         self._feedback_producer.send(json.dumps(feedback_data).encode('utf-8'))
         logger.info(f"Sent feedback for conversation {feedback_data.get('conversation_id')}")
+
+    async def send_platform_event(self, event_data: dict):
+        """Sends a generic event to the platform events topic."""
+        if not self._platform_events_producer:
+            raise RuntimeError("Producers not started. Call start_producers() first.")
+        
+        event_data['timestamp'] = datetime.now(timezone.utc).isoformat()
+        if 'event_id' not in event_data:
+            event_data['event_id'] = f"event_{uuid.uuid4()}"
+
+        self._platform_events_producer.send(json.dumps(event_data).encode('utf-8'))
+        logger.info(f"Sent platform event: {event_data.get('event_type')}")
 
     async def create_consumer_for_reply(self) -> (str, pulsar.Consumer):
         """
@@ -99,6 +117,8 @@ class H2MPulsarClient:
             self._response_producer.close()
         if self._feedback_producer:
             self._feedback_producer.close()
+        if self._platform_events_producer:
+            self._platform_events_producer.close()
         self.client.close()
 
 # Add pulsar config to H2M config model

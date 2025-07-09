@@ -13,6 +13,7 @@ from managerQ.app.core.task_dispatcher import task_dispatcher
 from managerQ.app.models import TaskStatus
 from managerQ.app.models import WorkflowEvent
 from managerQ.app.api.dashboard_ws import broadcast_workflow_event
+from managerQ.app.core.observability_manager import observability_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -117,6 +118,23 @@ class ResultListener:
         workflow_id = result_data.get("workflow_id")
         result_text = result_data.get("result")
         agent_personality = result_data.get("agent_personality")
+        timestamp_ms = result_data.get("timestamp")
+
+        # Calculate execution time
+        execution_time = (time.time() * 1000) - timestamp_ms if timestamp_ms else None
+
+        # Broadcast performance metric
+        if agent_personality and task_id:
+            asyncio.run(observability_manager.broadcast({
+                "type": "AGENT_PERFORMANCE_METRIC",
+                "payload": {
+                    "agent_id": agent_personality,
+                    "task_id": task_id,
+                    "workflow_id": workflow_id,
+                    "status": "COMPLETED", # Assuming success for now
+                    "execution_time_ms": execution_time
+                }
+            }))
 
         # Set the result for any part of the system that might be awaiting it
         if task_id:

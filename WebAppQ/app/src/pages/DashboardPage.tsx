@@ -2,9 +2,8 @@
 import React from 'react';
 import { Container, Typography, Grid, Paper } from '@mui/material';
 import { ActiveWorkflowsWidget } from '../components/Dashboard/ActiveWorkflowsWidget';
-
-const AgentPerformanceWidget = () => <Paper sx={{p: 2, height: '100%'}}>Agent Performance Widget</Paper>;
-const ModelTestsWidget = () => <Paper sx={{p: 2, height: '100%'}}>Model A/B Tests Widget</Paper>;
+import { AgentPerformanceWidget } from '../components/Dashboard/AgentPerformanceWidget';
+import { ModelTestsWidget } from '../components/Dashboard/ModelTestsWidget';
 
 export const DashboardPage: React.FC = () => {
     return (
@@ -13,13 +12,13 @@ export const DashboardPage: React.FC = () => {
                 Observability Dashboard
             </Typography>
             <Grid container spacing={3}>
-                <Grid xs={12} md={8}>
+                <Grid item>
                     <ActiveWorkflowsWidget />
                 </Grid>
-                <Grid xs={12} md={4}>
+                <Grid item>
                     <AgentPerformanceWidget />
                 </Grid>
-                <Grid xs={12}>
+                <Grid item>
                     <ModelTestsWidget />
                 </Grid>
             </Grid>

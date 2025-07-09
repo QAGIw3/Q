@@ -2,16 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Paper, Typography, List, ListItem, ListItemText, Chip } from '@mui/material';
 import { Workflow } from '../../services/types';
-
-// This would be in a shared WebSocket service file
-const connectToObservabilitySocket = (onMessage: (data: any) => void) => {
-    const wsUrl = (process.env.REACT_APP_MANAGERQ_API_URL || 'http://localhost:8000').replace('http', 'ws') + '/v1/observability/ws';
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (event) => {
-        onMessage(JSON.parse(event.data));
-    };
-    return ws;
-};
+import { connectToObservabilitySocket } from './shared';
 
 export const ActiveWorkflowsWidget: React.FC = () => {
     const [workflows, setWorkflows] = useState<Record<string, Workflow>>({});

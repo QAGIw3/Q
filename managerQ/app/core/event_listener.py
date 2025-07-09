@@ -12,6 +12,7 @@ from managerQ.app.core.agent_registry import agent_registry
 from managerQ.app.api.dashboard_ws import manager as dashboard_manager
 from managerQ.app.core.workflow_manager import workflow_manager
 from managerQ.app.models import Workflow
+from managerQ.app.core.observability_manager import observability_manager
 
 logger = structlog.get_logger(__name__)
 
@@ -71,11 +72,21 @@ class EventListener:
 
             if event_type == "anomaly.detected.error_rate":
                 self.handle_anomaly_event(event_data)
+            elif event_type == "MODEL_FEEDBACK_RECEIVED":
+                self.handle_model_feedback_event(event_data)
         
         except json.JSONDecodeError:
             logger.warning("Could not decode event message", raw_data=msg.data())
         except Exception as e:
             logger.error("Failed to handle event message", error=str(e), exc_info=True)
+
+    def handle_model_feedback_event(self, event_data: dict):
+        """Handles a model feedback event by broadcasting it to the dashboard."""
+        logger.info(f"Broadcasting model feedback event: {event_data['payload']}")
+        asyncio.run(observability_manager.broadcast({
+            "type": "MODEL_A/B_TEST_UPDATE",
+            "payload": event_data["payload"]
+        }))
 
     def handle_anomaly_event(self, event_data: dict):
         """Handles an error rate anomaly event by calling the planner to create an investigation workflow."""

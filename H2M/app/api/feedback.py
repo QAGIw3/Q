@@ -23,7 +23,21 @@ async def submit_feedback(
     feedback_data['user'] = user.dict() # Add user info to the event payload
 
     try:
+        # Send to the dedicated feedback topic for analytics
         await h2m_pulsar_client.send_feedback(feedback_data)
+        
+        # Also send a platform event if model feedback is present
+        if request.model_version:
+            platform_event = {
+                "event_type": "MODEL_FEEDBACK_RECEIVED",
+                "payload": {
+                    "model_version": request.model_version,
+                    "score": request.score,
+                    "context": request.context
+                }
+            }
+            await h2m_pulsar_client.send_platform_event(platform_event)
+
         return {"status": "Feedback received"}
     except RuntimeError as e:
         logger.error(f"Failed to send feedback to Pulsar: {e}", exc_info=True)
