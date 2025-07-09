@@ -5,7 +5,7 @@ import structlog
 
 from agentQ.app.core.toolbox import Toolbox, Tool
 from agentQ.app.core.context import ContextManager
-from agentQ.app.core.devops_tools import get_service_logs_tool, get_service_dependencies_tool, rollback_deployment_tool, get_recent_deployments_tool, restart_service_tool, increase_replicas_tool
+from agentQ.app.core.devops_tools import get_service_logs_tool, get_service_dependencies_tool, rollback_deployment_tool, get_recent_deployments_tool, restart_service_tool, increase_replicas_tool, list_pods_tool
 # We can also give it general-purpose tools
 from agentQ.app.core.human_tool import human_tool
 from agentQ.app.core.integrationhub_tool import integrationhub_tool
@@ -67,6 +67,7 @@ def setup_devops_agent(config: dict):
     devops_toolbox.register_tool(Tool(name=rollback_deployment_tool.name, description=rollback_deployment_tool.description, func=rollback_deployment_tool.func, config=config['services']))
     devops_toolbox.register_tool(Tool(name=restart_service_tool.name, description=restart_service_tool.description, func=restart_service_tool.func, config=config['services']))
     devops_toolbox.register_tool(Tool(name=increase_replicas_tool.name, description=increase_replicas_tool.description, func=increase_replicas_tool.func, config=config['services']))
+    devops_toolbox.register_tool(Tool(name=list_pods_tool.name, description=list_pods_tool.description, func=list_pods_tool.func, config=config['services']))
     devops_toolbox.register_tool(log_incident_report_tool)
     
     # General tools

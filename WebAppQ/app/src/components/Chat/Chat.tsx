@@ -17,6 +17,8 @@ const Chat: React.FC = () => {
     const [input, setInput] = useState('');
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isConnected, setIsConnected] = useState(false);
+    const [isWaitingForClarification, setIsWaitingForClarification] = useState(false);
+    const [pendingWorkflowId, setPendingWorkflowId] = useState<string | null>(null);
     
     const authContext = useContext(AuthContext);
     const ws = useRef<WebSocket | null>(null);
@@ -92,20 +94,67 @@ const Chat: React.FC = () => {
         return () => ws.current?.close();
     }, [authContext, conversationId]);
 
-    const handleSendMessage = () => {
-        if (input.trim() && ws.current?.readyState === WebSocket.OPEN) {
-            const userMessage: Message = {
-                id: `user-${Date.now()}`,
-                text: input,
-                sender: 'user',
-            };
-            const payload = {
-                text: input,
-                conversation_id: conversationId,
-            };
-            ws.current.send(JSON.stringify(payload));
-            setMessages(prev => [...prev, userMessage]);
-            setInput('');
+    const handleSendMessage = async () => {
+        if (!input.trim() || !authContext?.token) return;
+
+        const userMessage: Message = { id: `user-${Date.now()}`, text: input, sender: 'user' };
+        setMessages(prev => [...prev, userMessage]);
+        const currentInput = input;
+        setInput('');
+
+        // If waiting for clarification, send the answer to the specific endpoint
+        if (isWaitingForClarification && pendingWorkflowId) {
+            try {
+                const res = await fetch(`http://localhost:8001/api/v1/goals/${pendingWorkflowId}/clarify`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authContext.token}` },
+                    body: JSON.stringify({ answer: currentInput }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    const agentMessage: Message = { id: `agent-${Date.now()}`, text: `Got it. A new workflow (${data.workflow_id}) has been created. I'll get started.`, sender: 'agent' };
+                    setMessages(prev => [...prev, agentMessage]);
+                } else {
+                    throw new Error(data.detail?.message || "Failed to submit clarification.");
+                }
+            } catch (error: any) {
+                const errorMessage: Message = { id: `agent-${Date.now()}`, text: `Error: ${error.message}`, sender: 'agent' };
+                setMessages(prev => [...prev, errorMessage]);
+            } finally {
+                setIsWaitingForClarification(false);
+                setPendingWorkflowId(null);
+            }
+            return;
+        }
+
+        // If it is a new prompt, send it to the task submission endpoint
+        try {
+            const response = await fetch('http://localhost:8001/api/v1/tasks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authContext.token}` },
+                body: JSON.stringify({ prompt: currentInput }),
+            });
+            const data = await response.json();
+
+            if (response.ok) {
+                 if (data.status === 'pending_clarification') {
+                    const agentMessage: Message = { id: `agent-${Date.now()}`, text: data.clarifying_question, sender: 'agent' };
+                    setMessages(prev => [...prev, agentMessage]);
+                    setIsWaitingForClarification(true);
+                    setPendingWorkflowId(data.workflow_id);
+                } else {
+                    const agentMessage: Message = { id: `agent-${Date.now()}`, text: `Workflow ${data.workflow_id} submitted with ${data.num_tasks} tasks.`, sender: 'agent' };
+                    setMessages(prev => [...prev, agentMessage]);
+                }
+            } else {
+                // If the API returns a 400 for ambiguity, it's now handled by the status code check above.
+                // This will handle other errors.
+                const errorDetail = data.detail?.message || JSON.stringify(data.detail);
+                throw new Error(errorDetail);
+            }
+        } catch (error: any) {
+            const errorMessage: Message = { id: `agent-${Date.now()}`, text: `Error: ${error.message}`, sender: 'agent' };
+            setMessages(prev => [...prev, errorMessage]);
         }
     };
 

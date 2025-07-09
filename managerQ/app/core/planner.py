@@ -111,6 +111,9 @@ The workflow contains a `shared_context` dictionary for passing data and a `task
 - **Pass Data:** Structure task results as JSONs where possible so downstream tasks can access specific fields. For example, a task that checks something should return `{"status": "ok", "details": "..."}`.
 - **Agent Selection:** Be thoughtful about which agent (`agent_personality`) is best for each task.
 
+**Agent-Specific Tooling Notes:**
+- The `devops` agent has access to tools like `list_kubernetes_pods`, `get_service_logs`, `restart_service`, and `rollback_deployment`. When generating a plan for DevOps tasks, prefer creating tasks that use these specific tools.
+
 **Example of a Conditional Workflow:**
 Request: "Try to optimize the database query. If it's successful, re-deploy the service. If it fails, revert the changes and notify the database admin."
 
@@ -286,6 +289,23 @@ class Planner:
         logger.info("Prompt is clear. Generating detailed workflow.")
         workflow = await self._generate_workflow(user_prompt, analysis)
         return workflow
+
+    async def replan_with_clarification(self, original_prompt: str, user_clarification: str) -> Workflow:
+        """
+        Takes an original prompt and a user's clarifying answer and attempts to create a new plan.
+        """
+        logger.info(f"Re-planning with clarification: '{user_clarification}'")
+        
+        # Combine the original prompt with the user's answer to form a new, more detailed prompt.
+        # This is a simple but effective strategy.
+        new_prompt = (
+            f"Original Goal: {original_prompt}\n"
+            f"My Clarifying Answer: {user_clarification}"
+        )
+        
+        # Use the main create_plan method to run the full analysis and planning pipeline
+        # on the new, clarified prompt.
+        return await self.create_plan(new_prompt)
 
 
 # Singleton instance

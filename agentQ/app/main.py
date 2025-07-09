@@ -43,6 +43,7 @@ from agentQ.data_analyst_agent import setup_data_analyst_agent, DATA_ANALYST_SYS
 from agentQ.knowledge_engineer_agent import setup_knowledge_engineer_agent, KNOWLEDGE_ENGINEER_SYSTEM_PROMPT, AGENT_ID as KE_AGENT_ID, TASK_TOPIC as KE_TASK_TOPIC
 from agentQ.predictive_analyst_agent import setup_predictive_analyst_agent, PREDICTIVE_ANALYST_SYSTEM_PROMPT, AGENT_ID as PA_AGENT_ID, TASK_TOPIC as PA_TASK_TOPIC
 from agentQ.docs_agent import setup_docs_agent, DOCS_AGENT_SYSTEM_PROMPT, AGENT_ID as DOCS_AGENT_ID, TASK_TOPIC as DOCS_TASK_TOPIC
+from agentQ.reflector_agent import ReflectorAgent
 
 # --- Reflector Agent ---
 REFLECTOR_AGENT_ID = "agentq-reflector-singleton"
@@ -379,6 +380,26 @@ def react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config,
 
     return "Error: Reached maximum turns without a final answer."
 
+async def reflector_loop(prompt_data, qpulse_client):
+    """A simplified loop for the one-shot Reflector Agent."""
+    logger.info("Executing reflector loop.")
+    prompt = prompt_data.get("prompt")
+    
+    try:
+        # The prompt for the reflector is the JSON of the completed workflow
+        reflector_agent = ReflectorAgent(qpulse_url=qpulse_client.base_url)
+        lesson = await reflector_agent.run(prompt)
+        
+        # The "result" of the reflector agent is the lesson it learned.
+        # This will be sent back to the manager, but the primary action is
+        # that the reflector agent should have used a tool to store this.
+        # For now, we return the lesson as the result.
+        return lesson
+    except Exception as e:
+        logger.error(f"Reflector agent failed to generate lesson: {e}", exc_info=True)
+        return f"Error: Failed to generate lesson. Reason: {e}"
+
+
 # --- Agent Setup ---
 
 def setup_default_agent(config: dict):
@@ -569,7 +590,11 @@ def run_agent():
                         continue
 
                     logger.info("Received task", task_id=prompt_data.get("id"), workflow_id=prompt_data.get("workflow_id"))
-                    final_result = react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config, thoughts_producer)
+                    
+                    if personality == "reflector":
+                        final_result = asyncio.run(reflector_loop(prompt_data, qpulse_client))
+                    else:
+                        final_result = react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config, thoughts_producer)
                     
                     # Publish the final result
                     result_message = {

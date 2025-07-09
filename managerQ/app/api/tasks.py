@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from managerQ.app.core.planner import planner, AmbiguousGoalError
 from managerQ.app.core.workflow_manager import workflow_manager
 from managerQ.app.core.task_dispatcher import task_dispatcher
+from managerQ.app.models import Workflow, WorkflowStatus, TaskBlock
 from shared.q_auth_parser.parser import get_current_user
 from shared.q_auth_parser.models import UserClaims
 
@@ -18,6 +19,7 @@ class WorkflowSubmitResponse(BaseModel):
     workflow_id: str
     status: str
     num_tasks: int
+    clarifying_question: str = None
 
 @router.post("", response_model=WorkflowSubmitResponse, status_code=status.HTTP_202_ACCEPTED)
 async def submit_task_and_create_workflow(
@@ -60,16 +62,26 @@ async def submit_task_and_create_workflow(
             )
 
     except AmbiguousGoalError as e:
-        logger.warning(f"Ambiguous goal from user '{user.preferred_username}': {e.clarifying_question}")
-        # Return a structured error response that the UI can use
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "type": "ambiguous_goal",
-                "message": str(e),
-                "clarifying_question": e.clarifying_question,
-            },
+        logger.warning(f"Ambiguous goal from user '{user.preferred_username}'. Creating workflow pending clarification.")
+        
+        # Create a placeholder workflow that is waiting for the user's response
+        pending_workflow = Workflow(
+            original_prompt=request.prompt,
+            status=WorkflowStatus.PENDING_CLARIFICATION,
+            tasks=[], # No tasks yet
+            shared_context={
+                "clarifying_question": e.clarifying_question
+            }
         )
+        workflow_manager.create_workflow(pending_workflow)
+
+        return WorkflowSubmitResponse(
+            workflow_id=pending_workflow.workflow_id,
+            status=WorkflowStatus.PENDING_CLARIFICATION,
+            num_tasks=0,
+            clarifying_question=e.clarifying_question
+        )
+
     except ValueError as e: # From planner failure
         logger.error(f"Planning failed for prompt '{request.prompt}': {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to create a valid workflow: {e}")

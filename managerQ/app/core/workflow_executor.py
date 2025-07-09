@@ -8,7 +8,9 @@ import json
 from managerQ.app.core.workflow_manager import workflow_manager
 from managerQ.app.core.agent_registry import agent_registry
 from managerQ.app.core.task_dispatcher import task_dispatcher
-from managerQ.app.models import TaskStatus, WorkflowStatus, Workflow, TaskBlock, WorkflowTask, ConditionalBlock
+from managerQ.app.models import TaskStatus, WorkflowStatus, Workflow, TaskBlock, WorkflowTask, ConditionalBlock, WorkflowEvent
+from managerQ.app.api.dashboard_ws import broadcast_workflow_event
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,13 @@ class WorkflowExecutor:
                 workflow_manager.update_workflow(workflow)
                 logger.info(f"Workflow '{workflow.workflow_id}' has finished with status '{final_status.value}'.")
                 
+                # Broadcast completion event
+                asyncio.run(broadcast_workflow_event(WorkflowEvent(
+                    event_type="WORKFLOW_COMPLETED",
+                    workflow_id=workflow.workflow_id,
+                    data={"status": final_status.value}
+                )))
+
                 # Trigger the reflection task
                 self._trigger_reflection_task(workflow)
 
@@ -152,6 +161,14 @@ class WorkflowExecutor:
         )
         
         workflow_manager.update_task_status(workflow.workflow_id, task.task_id, TaskStatus.DISPATCHED)
+        
+        # Broadcast dispatch event
+        asyncio.run(broadcast_workflow_event(WorkflowEvent(
+            event_type="TASK_STATUS_UPDATE",
+            workflow_id=workflow.workflow_id,
+            task_id=task.task_id,
+            data={"status": TaskStatus.DISPATCHED.value}
+        )))
 
     def _evaluate_conditional(self, block: ConditionalBlock, workflow: Workflow):
         """Evaluates the branches of a conditional block."""
@@ -170,6 +187,15 @@ class WorkflowExecutor:
                     logger.info(f"Condition '{branch.condition}' for block '{block.task_id}' evaluated to True. Processing branch.")
                     # Mark the conditional block itself as completed *before* processing the new branch
                     workflow_manager.update_task_status(workflow.workflow_id, block.task_id, TaskStatus.COMPLETED)
+                    
+                    # Broadcast evaluation event
+                    asyncio.run(broadcast_workflow_event(WorkflowEvent(
+                        event_type="CONDITIONAL_EVALUATED",
+                        workflow_id=workflow.workflow_id,
+                        task_id=block.task_id,
+                        data={"condition": branch.condition, "result": True}
+                    )))
+
                     # Recursively process the tasks in the chosen branch
                     self._process_blocks(branch.tasks, workflow)
                     return # Exit after finding the first true branch
@@ -181,6 +207,14 @@ class WorkflowExecutor:
         # If no branch was taken, the conditional is considered complete.
         logger.debug(f"No conditions met for conditional block '{block.task_id}'. Marking as complete.")
         workflow_manager.update_task_status(workflow.workflow_id, block.task_id, TaskStatus.COMPLETED)
+        
+        # Broadcast evaluation event for no branch taken
+        asyncio.run(broadcast_workflow_event(WorkflowEvent(
+            event_type="CONDITIONAL_EVALUATED",
+            workflow_id=workflow.workflow_id,
+            task_id=block.task_id,
+            data={"condition": "None", "result": False}
+        )))
 
     def _get_evaluation_context(self, workflow: Workflow) -> dict:
         """

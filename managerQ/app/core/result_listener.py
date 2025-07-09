@@ -11,6 +11,8 @@ from typing import Dict, Any, Optional
 from managerQ.app.core.workflow_manager import workflow_manager
 from managerQ.app.core.task_dispatcher import task_dispatcher
 from managerQ.app.models import TaskStatus
+from managerQ.app.models import WorkflowEvent
+from managerQ.app.api.dashboard_ws import broadcast_workflow_event
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -149,6 +151,14 @@ class ResultListener:
                     "result": result_data_json
                 }
             }
+            
+            # Broadcast the completion event
+            asyncio.run(broadcast_workflow_event(WorkflowEvent(
+                event_type="TASK_STATUS_UPDATE",
+                workflow_id=workflow_id,
+                task_id=task_id,
+                data={"status": TaskStatus.COMPLETED.value, "result": result_text}
+            )))
 
             workflow_manager.update_task_status(
                 workflow_id=workflow_id,

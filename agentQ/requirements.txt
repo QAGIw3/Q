@@ -32,3 +32,9 @@ pyyaml
 # For AIOps tools
 elasticsearch==8.11.0
 kubernetes==28.1.0
+
+# For agentQ specific dependencies
+fastavro
+pyignite
+sentence-transformers
+kubernetes

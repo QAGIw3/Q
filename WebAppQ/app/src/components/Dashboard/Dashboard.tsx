@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../../AuthContext';
 import './Dashboard.css';
+import WorkflowVisualizer from '../WorkflowVisualizer/WorkflowVisualizer';
 
 interface Anomaly {
     id: string;
     service_name: string;
     message: string;
     timestamp: string;
+    workflow_id?: string;
     workflow?: Workflow;
 }
 
@@ -46,6 +48,7 @@ export const Dashboard: React.FC = () => {
                     service_name: anomalyData.service_name,
                     message: anomalyData.message,
                     timestamp: message.data.timestamp,
+                    workflow_id: anomalyData.workflow_id, // Assuming the event contains this
                 };
                 setAnomalies(prev => ({ ...prev, [newAnomaly.id]: newAnomaly }));
             }
@@ -84,7 +87,9 @@ export const Dashboard: React.FC = () => {
                     <div>
                         <h3>{selectedAnomaly.service_name}</h3>
                         <p>{selectedAnomaly.message}</p>
-                        {/* Workflow steps would be rendered here */}
+                        {selectedAnomaly.workflow_id && (
+                            <WorkflowVisualizer workflowId={selectedAnomaly.workflow_id} />
+                        )}
                     </div>
                 ) : (
                     <p>Select an anomaly to view details.</p>

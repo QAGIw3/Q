@@ -5,7 +5,11 @@ pydantic
 gremlinpython==3.7.0
 structlog
 pyyaml
+fastavro
 
 # Shared Libraries (installed in editable mode)
 # These are required for the application to run.
 -e ./shared/q_auth_parser
+
+# Add sentence-transformers for generating embeddings
+sentence-transformers

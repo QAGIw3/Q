@@ -44,6 +44,7 @@ class WorkflowStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    PENDING_CLARIFICATION = "pending_clarification"
 
 class Workflow(BaseModel):
     workflow_id: str = Field(default_factory=lambda: f"wf_{uuid.uuid4()}")
@@ -102,6 +103,17 @@ class Condition(BaseModel):
     operator: Literal["<", ">", "==", "!=", "<=", ">="]
     value: float
     service: str = Field(description="The service the metric applies to.")
+
+class ClarificationResponse(BaseModel):
+    """Represents the user's answer to a clarifying question."""
+    answer: str
+
+class WorkflowEvent(BaseModel):
+    """Represents a real-time event in a workflow's lifecycle."""
+    event_type: str  # e.g., "TASK_STATUS_UPDATE", "WORKFLOW_COMPLETED"
+    workflow_id: str
+    task_id: Optional[str] = None
+    data: Dict[str, Any] = Field(default_factory=dict)
 
 class Goal(BaseModel):
     goal_id: str = Field(default_factory=lambda: f"goal_{uuid.uuid4()}")

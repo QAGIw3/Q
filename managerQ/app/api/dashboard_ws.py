@@ -2,6 +2,8 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import List, Dict
 
+from managerQ.app.models import WorkflowEvent
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -27,6 +29,10 @@ class ConnectionManager:
             await connection.send_json(message)
 
 manager = ConnectionManager()
+
+async def broadcast_workflow_event(event: WorkflowEvent):
+    """A helper function to allow other modules to broadcast events."""
+    await manager.broadcast(event.dict())
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

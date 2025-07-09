@@ -309,6 +309,43 @@ def increase_service_replicas(service_name: str, new_replica_count: int, namespa
         return f"Error: An unexpected error occurred during scaling: {e}"
 
 
+def list_kubernetes_pods(namespace: str = "default") -> str:
+    """
+    Lists all pods in a given Kubernetes namespace, along with their status and age.
+
+    Args:
+        namespace (str): The Kubernetes namespace to query.
+
+    Returns:
+        A JSON string representing a list of pods and their details, or an error message.
+    """
+    if not k8s_core_v1:
+        return "Error: Kubernetes client is not configured. Cannot list pods."
+
+    logger.info(f"DevOps Tool: Listing pods in namespace '{namespace}'.")
+    
+    try:
+        pod_list = k8s_core_v1.list_namespaced_pod(namespace=namespace, limit=50)
+        
+        pods = []
+        for pod in pod_list.items:
+            pods.append({
+                "name": pod.metadata.name,
+                "status": pod.status.phase,
+                "ip": pod.status.pod_ip,
+                "age": (datetime.utcnow().replace(tzinfo=None) - pod.metadata.creation_timestamp.replace(tzinfo=None)).total_seconds(),
+                "restarts": sum(cs.restart_count for cs in pod.status.container_statuses) if pod.status.container_statuses else 0,
+            })
+            
+        return json.dumps(pods, indent=2)
+    except client.ApiException as e:
+        logger.error(f"Kubernetes API error while listing pods: {e}", exc_info=True)
+        return f"Error: Failed to list pods in namespace '{namespace}'. Kubernetes API error: {e.body}"
+    except Exception as e:
+        logger.error(f"Unexpected error while listing pods: {e}", exc_info=True)
+        return f"Error: An unexpected error occurred while listing pods: {e}"
+
+
 # --- Tool Registration ---
 
 get_service_logs_tool = Tool(
@@ -345,4 +382,10 @@ increase_replicas_tool = Tool(
     name="increase_service_replicas",
     description="Scales a service's deployment to a specified number of replicas to handle increased load. Requires human confirmation.",
     func=increase_service_replicas
+) 
+
+list_pods_tool = Tool(
+    name="list_kubernetes_pods",
+    description="Lists all pods in a given Kubernetes namespace, along with their status and age.",
+    func=list_kubernetes_pods
 ) 
