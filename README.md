@@ -91,3 +91,11 @@ Once the infrastructure is deployed, you can run the services and the web applic
 | `agentQ` | *Future Service*: An autonomous agent for performing tasks. | `agentQ/README.md` |
 | `managerQ` | *Future Service*: A service for managing and coordinating multiple agents. | `managerQ/README.md` |
 | `ObservabilityStack`| *Future Service*: Will contain configurations for Prometheus, Grafana, etc. | `ObservabilityStack/README.md` |
+
+## Proactive Agent Abilities
+
+The platform now supports proactive, autonomous agent workflows orchestrated by `IntegrationHub`. These flows can be triggered on a schedule (e.g., via a cron job) to perform tasks like generating daily reports, monitoring data streams, or any other custom automation.
+
+A prime example is the `post_daily_zulip_summary` flow, which automatically asks an agent to summarize a Zulip stream and posts the result to a digest channel. This showcases the power of combining the agent's intelligence with the platform's integration capabilities.
+
+Refer to the `IntegrationHub/README.md` for more details on how to define and trigger these proactive flows.

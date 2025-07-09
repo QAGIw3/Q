@@ -52,6 +52,36 @@ PREDEFINED_FLOWS: Dict[str, Dict[str, Any]] = {
                 }
             }
         ]
+    },
+    "post_daily_zulip_summary": {
+        "id": "post_daily_zulip_summary",
+        "name": "Post Daily Zulip Summary",
+        "description": "Asks an agent to summarize a Zulip stream and posts the result to another stream. A proactive, scheduled task.",
+        "steps": [
+            {
+                "name": "Ask Agent for Summary",
+                "connector_id": "http",
+                "credential_id": "managerq-service-token", # A service account token for managerQ
+                "configuration": {
+                    "method": "POST",
+                    "url": "http://managerq:8003/v1/tasks",
+                    "json": {
+                        "prompt": "Using the summarize_stream_activity tool, create a summary for the 'knowledge-graph' stream for the past 24 hours. In your final answer, include ONLY the summary text itself, without any conversational pleasantries."
+                    }
+                }
+            },
+            {
+                "name": "Post Summary to Zulip",
+                "connector_id": "zulip",
+                "action_id": "send-message",
+                "credential_id": "zulip-credentials",
+                "configuration": {
+                    "stream": "daily-digest",
+                    "topic": "Daily Summary for {{ 'now' | date:'%Y-%m-%d' }}", # Simple templating could be added
+                    "content": "Good morning! Here is the summary of yesterday's activity in the #knowledge-graph stream:\n\n> {{ result }}"
+                }
+            }
+        ]
     }
 }
 
