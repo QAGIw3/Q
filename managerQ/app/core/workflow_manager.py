@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
 from pyignite import Client
 from pyignite.exceptions import PyIgniteError
 
@@ -44,8 +44,15 @@ class WorkflowManager:
             return Workflow(**workflow_data)
         return None
 
-    def update_task_status(self, workflow_id: str, task_id: str, status: TaskStatus, result: Optional[str] = None):
-        """Updates the status and result of a specific task within a workflow."""
+    def update_task_status(
+        self,
+        workflow_id: str,
+        task_id: str,
+        status: TaskStatus,
+        result: Optional[str] = None,
+        context_updates: Optional[Dict[str, Any]] = None
+    ):
+        """Updates the status and result of a specific task and merges data into the shared context."""
         workflow = self.get_workflow(workflow_id)
         if not workflow:
             logger.error(f"Cannot update task: Workflow '{workflow_id}' not found.")
@@ -60,6 +67,10 @@ class WorkflowManager:
         if result:
             task.result = result
         
+        # Merge new data into the shared context
+        if context_updates:
+            workflow.shared_context.update(context_updates)
+
         self.update_workflow(workflow)
 
         # Broadcast the update to the dashboard

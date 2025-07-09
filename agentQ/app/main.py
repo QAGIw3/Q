@@ -28,7 +28,7 @@ from agentQ.app.core.toolbox import Toolbox, Tool
 from agentQ.app.core.vectorstore_tool import vectorstore_tool
 from agentQ.app.core.human_tool import human_tool
 from agentQ.app.core.integrationhub_tool import integrationhub_tool
-from agentQ.app.core.knowledgegraph_tool import knowledgegraph_tool, summarize_activity_tool, find_experts_tool
+from agentQ.app.core.knowledgegraph_tool import knowledgegraph_tool, summarize_activity_tool, find_experts_tool, store_insight_tool
 from agentQ.app.core.quantumpulse_tool import quantumpulse_tool
 from agentQ.app.core.memory_tool import save_memory_tool, search_memory_tool
 from agentQ.app.core.github_tool import github_tool
@@ -43,6 +43,29 @@ from agentQ.data_analyst_agent import setup_data_analyst_agent, DATA_ANALYST_SYS
 from agentQ.knowledge_engineer_agent import setup_knowledge_engineer_agent, KNOWLEDGE_ENGINEER_SYSTEM_PROMPT, AGENT_ID as KE_AGENT_ID, TASK_TOPIC as KE_TASK_TOPIC
 from agentQ.predictive_analyst_agent import setup_predictive_analyst_agent, PREDICTIVE_ANALYST_SYSTEM_PROMPT, AGENT_ID as PA_AGENT_ID, TASK_TOPIC as PA_TASK_TOPIC
 from agentQ.docs_agent import setup_docs_agent, DOCS_AGENT_SYSTEM_PROMPT, AGENT_ID as DOCS_AGENT_ID, TASK_TOPIC as DOCS_TASK_TOPIC
+
+# --- Reflector Agent ---
+REFLECTOR_AGENT_ID = "agentq-reflector-singleton"
+REFLECTOR_TASK_TOPIC = f"persistent://public/default/q.agentq.tasks.{REFLECTOR_AGENT_ID}"
+REFLECTOR_SYSTEM_PROMPT = """
+You are a Reflector Agent. Your sole purpose is to analyze a completed workflow to find insights and lessons that can improve future performance.
+
+You will be given a detailed JSON record of a completed workflow, including the original goal, the final status, and every task that was run.
+
+Your process is:
+1.  **Analyze the record:** Carefully read the entire workflow to understand what the original goal was and how the agents attempted to achieve it.
+2.  **Formulate a lesson:** Based on your analysis, create a single, concise, and actionable "lesson learned." This lesson should be a general principle that could help an agent make a better decision in a similar situation in the future.
+    -   **Good Example (from a failure):** "When a 'devops' task to query metrics fails, a preliminary step should be to check the health of the monitoring service itself."
+    -   **Good Example (from a success):** "For user feedback analysis, combining sentiment scores with performance metrics provides a more complete picture of release impact."
+    -   **Bad Example (too specific):** "Task 'task_123' failed."
+3.  **Store the lesson:** Use the `store_insight_in_kg` tool to save your lesson to the knowledge graph. You must extract the `workflow_id`, `original_prompt`, `final_status`, and your formulated `lesson_learned` from the prompt and pass them to the tool.
+4.  **Finish:** Once the insight is stored, your job is complete. Use the `finish` action.
+
+You have only one tool available:
+{tools}
+
+Begin!
+"""
 
 # Initialize tracing and logging
 setup_tracing(app=None)
@@ -213,6 +236,7 @@ def react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config,
     """The main ReAct loop for processing a user request."""
     user_prompt = prompt_data.get("prompt")
     conversation_id = prompt_data.get("id") # Assuming prompt_id is the conversation_id
+    agent_id = prompt_data.get("agent_id") # We need the agent_id for the memory object
 
     # Initialize the scratchpad for this loop
     scratchpad = []
@@ -297,7 +321,7 @@ def react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config,
                 Based on our entire conversation, generate a structured JSON object for my long-term memory.
                 The JSON object must conform to the following schema:
                 {{
-                    "agent_id": "{prompt_data.get('agent_id')}",
+                    "agent_id": "{agent_id}",
                     "conversation_id": "{conversation_id}",
                     "summary": "A concise, one-paragraph summary of the key facts, findings, and conclusions.",
                     "entities": ["A list of key entities involved (e.g., service names, technologies, people)."],
@@ -443,6 +467,20 @@ def setup_default_agent(config: dict):
     ))
     return toolbox
 
+def setup_reflector_agent(config: dict):
+    """Sets up the toolbox and context for the reflector agent."""
+    logger.info("Setting up reflector agent...")
+    toolbox = Toolbox()
+    
+    # The reflector agent ONLY has the tool to store insights.
+    toolbox.register_tool(store_insight_tool)
+    
+    # It still needs a context manager for its own operations, though it's minimal
+    context_manager = ContextManager(ignite_addresses=config['ignite']['addresses'], agent_id=REFLECTOR_AGENT_ID)
+    context_manager.connect()
+    
+    return toolbox, context_manager
+
 def run_agent():
     config = load_config()
     pulsar_config = config['pulsar']
@@ -478,6 +516,11 @@ def run_agent():
         task_topic = DOCS_TASK_TOPIC
         system_prompt = DOCS_AGENT_SYSTEM_PROMPT
         toolbox, context_manager = setup_docs_agent(config)
+    elif personality == "reflector":
+        agent_id = REFLECTOR_AGENT_ID
+        task_topic = REFLECTOR_TASK_TOPIC
+        system_prompt = REFLECTOR_SYSTEM_PROMPT
+        toolbox, context_manager = setup_reflector_agent(config)
     else: # Default personality
         agent_id = f"agentq-default-{uuid.uuid4()}"
         task_topic = f"persistent://public/default/q.agentq.tasks.{agent_id}"

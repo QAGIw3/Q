@@ -35,38 +35,54 @@ const Chat: React.FC = () => {
         ws.current.onmessage = (event) => {
             const receivedMessage = JSON.parse(event.data);
 
+            // Handle streamed thoughts
             if (receivedMessage.type === 'thought') {
                 const thoughtMessage: Message = {
                     id: `thought-${Date.now()}-${Math.random()}`,
-                    text: `Thinking: ${receivedMessage.text}`, // Add a prefix for clarity
+                    text: `Thinking: ${receivedMessage.text}`,
                     sender: 'thought',
                 };
                 setMessages(prev => [...prev, thoughtMessage]);
-                return; // Don't process as a regular agent message
+                return;
             }
 
-            let uiComponent = null;
-
-            try {
-                const potentialUI = JSON.parse(receivedMessage.text);
-                if (potentialUI.ui_component) {
-                    uiComponent = potentialUI;
+            // Handle streamed response tokens
+            if (receivedMessage.type === 'token') {
+                setMessages(prevMessages => {
+                    const lastMessage = prevMessages[prevMessages.length - 1];
+                    // If the last message was from the agent, append the token
+                    if (lastMessage && lastMessage.sender === 'agent') {
+                        const updatedMessages = [...prevMessages];
+                        updatedMessages[prevMessages.length - 1] = {
+                            ...lastMessage,
+                            text: lastMessage.text + receivedMessage.text,
+                            conversation_id: receivedMessage.conversation_id
+                        };
+                        return updatedMessages;
+                    } else {
+                        // Otherwise, create a new agent message
+                        const newMessage: Message = {
+                            id: `agent-${Date.now()}`,
+                            text: receivedMessage.text,
+                            sender: 'agent',
+                            conversation_id: receivedMessage.conversation_id,
+                            feedback: null,
+                        };
+                        return [...prevMessages, newMessage];
+                    }
+                });
+                
+                // Set conversation ID if it's the first agent message
+                if (receivedMessage.conversation_id && !conversationId) {
+                    setConversationId(receivedMessage.conversation_id);
                 }
-            } catch (e) {
-                // Not a UI component, treat as plain text
+                return;
             }
 
-            const agentMessage: Message = {
-                id: `agent-${Date.now()}-${Math.random()}`,
-                text: receivedMessage.text,
-                sender: 'agent',
-                conversation_id: receivedMessage.conversation_id,
-                feedback: null,
-                ui_component: uiComponent,
-            };
-            setMessages(prev => [...prev, agentMessage]);
-            if (receivedMessage.conversation_id && !conversationId) {
-                setConversationId(receivedMessage.conversation_id);
+            // Handle end-of-stream or errors if needed
+            if (receivedMessage.type === 'final' || receivedMessage.type === 'error') {
+                console.log("Stream ended or error occurred:", receivedMessage.text);
+                // Optionally, you could update the message state to indicate completion or error
             }
         };
 

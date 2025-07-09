@@ -1,12 +1,13 @@
 import logging
 import time
 import threading
+import asyncio
 from typing import Optional, Dict, Any
 from pyignite import Client
 from pyignite.exceptions import PyIgniteError
 
 from managerQ.app.core.goal_manager import goal_manager
-from managerQ.app.core.planner import planner
+from managerQ.app.core.planner import planner, AmbiguousGoalError
 from managerQ.app.core.workflow_manager import workflow_manager
 from managerQ.app.config import settings
 from managerQ.app.models import Goal, Condition
@@ -169,9 +170,16 @@ class ProactiveGoalMonitor:
             )
         
         try:
-            workflow = planner.create_plan(prompt)
+            # Since this runs in a sync thread, we use asyncio.run()
+            workflow = asyncio.run(planner.create_plan(prompt))
             workflow_manager.create_workflow(workflow)
             logger.info(f"Created and saved new remediation workflow '{workflow.workflow_id}'.")
+        except AmbiguousGoalError as e:
+            logger.critical(
+                "The planner found an auto-generated remediation prompt to be ambiguous. This should not happen. "
+                f"Prompt: '{prompt}'. Error: {e.clarifying_question}",
+                exc_info=True
+            )
         except Exception as e:
             logger.error(f"Failed to create remediation workflow: {e}", exc_info=True)
 

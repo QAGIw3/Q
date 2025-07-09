@@ -1,6 +1,7 @@
 import httpx
 import logging
 import asyncio
+from typing import AsyncGenerator
 
 from .models import InferenceRequest, QPChatRequest, QPChatResponse
 
@@ -81,6 +82,29 @@ class QuantumPulseClient:
             raise
         except httpx.RequestError as e:
             logger.error(f"An error occurred while requesting chat completion: {e.request.url!r}.")
+            raise
+
+    async def get_chat_completion_stream(self, request: QPChatRequest) -> AsyncGenerator[str, None]:
+        """
+        Gets a streaming chat completion from the QuantumPulse service.
+
+        Args:
+            request: A QPChatRequest object with stream=True.
+
+        Yields:
+            Server-Sent Events chunks as strings.
+        """
+        client = await self._get_client()
+        try:
+            async with client.stream("POST", "/v1/chat/completions", json=request.dict()) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    yield chunk.decode('utf-8')
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Error getting chat completion stream: {e.response.status_code} - {e.response.text}")
+            raise
+        except httpx.RequestError as e:
+            logger.error(f"An error occurred while requesting chat completion stream: {e.request.url!r}.")
             raise
 
     async def close(self):

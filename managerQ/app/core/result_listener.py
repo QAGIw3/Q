@@ -5,6 +5,7 @@ import io
 import threading
 import time
 import asyncio
+import json
 from typing import Dict, Any, Optional
 
 from managerQ.app.core.workflow_manager import workflow_manager
@@ -135,11 +136,26 @@ class ResultListener:
                 workflow_id=workflow_id, 
                 task_id=task_id
             )
+
+            # Try to parse the result string as JSON to allow for structured data passing
+            try:
+                result_data_json = json.loads(result_text)
+            except json.JSONDecodeError:
+                result_data_json = result_text # Keep as string if not valid JSON
+
+            # The context update is keyed by the task_id for easy access in templates
+            context_updates = {
+                task_id: {
+                    "result": result_data_json
+                }
+            }
+
             workflow_manager.update_task_status(
                 workflow_id=workflow_id,
                 task_id=task_id,
                 status=TaskStatus.COMPLETED,
-                result=result_text
+                result=result_text,
+                context_updates=context_updates
             )
         else:
             # This is a result for a simple, non-workflow task that wasn't delegated.

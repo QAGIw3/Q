@@ -1,6 +1,8 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from openai import OpenAI
+from fastapi.responses import StreamingResponse
+import json
 
 from app.models.chat import ChatRequest, ChatResponse
 from shared.q_auth_parser.parser import get_current_user
@@ -35,6 +37,17 @@ def get_openai_client():
     return client
 
 
+async def sse_generator(openai_stream):
+    """Generator function to yield Server-Sent Events from the OpenAI stream."""
+    try:
+        for chunk in openai_stream:
+            yield f"data: {chunk.json()}\n\n"
+    except Exception as e:
+        logger.error(f"Error in SSE generator: {e}", exc_info=True)
+        # Yield a final error message if something goes wrong
+        error_payload = {"error": "An error occurred while streaming."}
+        yield f"data: {json.dumps(error_payload)}\n\n"
+
 @router.post("/completions", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 async def create_chat_completion(
     request: ChatRequest,
@@ -44,6 +57,7 @@ async def create_chat_completion(
     """
     Provides a synchronous, request/response endpoint for chat completions.
     This acts as a centralized gateway to the underlying LLM.
+    If `stream` is set to true, it returns a Server-Sent Events stream.
     """
     if not openai_client:
         raise HTTPException(
@@ -51,21 +65,31 @@ async def create_chat_completion(
             detail="The OpenAI client is not configured or failed to initialize."
         )
 
-    logger.info(f"Received chat completion request from user '{user.username}' for model '{request.model}'.")
+    logger.info(f"Received chat completion request from user '{user.username}' for model '{request.model}'. Stream: {request.stream}")
 
     try:
-        # Convert our Pydantic models to the dictionary format expected by the OpenAI client
         messages = [msg.dict() for msg in request.messages]
 
+        # If streaming is requested, return a StreamingResponse
+        if request.stream:
+            stream = openai_client.chat.completions.create(
+                model=request.model,
+                messages=messages,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                stream=True
+            )
+            return StreamingResponse(sse_generator(stream), media_type="text/event-stream")
+
+        # Otherwise, handle as a normal synchronous request
         completion = openai_client.chat.completions.create(
             model=request.model,
             messages=messages,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
-            stream=False # Explicitly false, as this endpoint is synchronous
+            stream=False
         )
         
-        # Transform the OpenAI response back into our Pydantic model
         response = ChatResponse(**completion.dict())
         
         logger.info(f"Successfully generated chat completion {response.id} for user '{user.username}'.")
