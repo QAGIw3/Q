@@ -53,9 +53,16 @@ class WorkflowExecutor:
         )
 
         self._running = True
-        self._thread = threading.Thread(target=self._consumer_loop, daemon=True)
+        # The loop will now be an asyncio task
+        self._thread = threading.Thread(target=self._start_async_loop, daemon=True)
         self._thread.start()
-        logger.info("WorkflowExecutor started and is now listening for task status updates.")
+        logger.info("WorkflowExecutor started.")
+
+    def _start_async_loop(self):
+        """Creates and runs the asyncio event loop."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self._consumer_loop())
 
     def stop(self):
         """Stops the executor loop."""
@@ -72,12 +79,12 @@ class WorkflowExecutor:
             self._pulsar_client.close()
         logger.info("WorkflowExecutor stopped.")
 
-    def _consumer_loop(self):
-        """The main loop for consuming task status updates."""
+    async def _consumer_loop(self):
+        """The main async loop for consuming task status updates."""
         while self._running:
             try:
-                msg = self._status_consumer.receive(timeout_millis=1000)
-                self._handle_status_update(msg)
+                msg = self._status_consumer.receive(timeout_millis=1000) # This is blocking, will be addressed
+                await self._handle_status_update(msg)
                 self._status_consumer.acknowledge(msg)
             except pulsar.Timeout:
                 continue
@@ -87,7 +94,7 @@ class WorkflowExecutor:
                     self._status_consumer.negative_acknowledge(msg)
                 asyncio.sleep(5)
 
-    def _handle_status_update(self, msg: pulsar.Message):
+    async def _handle_status_update(self, msg: pulsar.Message):
         """Processes a task status update message and triggers workflow progression."""
         context = extract_trace_context(msg.properties())
         with tracer.start_as_current_span("handle_status_update", context=context) as span:
@@ -114,6 +121,12 @@ class WorkflowExecutor:
                 logger.error(f"Invalid status '{status_str}' for task {task_id}.")
                 return
 
+            # NEW: Intercept failed status to trigger self-correction
+            if status == TaskStatus.FAILED:
+                logger.warning(f"Task {task_id} in workflow {workflow_id} has failed. Initiating self-correction process.")
+                await self._handle_task_failure(workflow_id, task_id, result)
+                return # Stop normal processing for this failed task
+
             # Instrument task status metric
             if status and status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
                 TASK_COMPLETED_COUNTER.labels(status=status.value).inc()
@@ -123,6 +136,56 @@ class WorkflowExecutor:
             workflow = workflow_manager.get_workflow(workflow_id)
             if workflow and workflow.status == WorkflowStatus.RUNNING:
                 self.process_workflow(workflow)
+
+    async def _handle_task_failure(self, workflow_id: str, task_id: str, result: str):
+        """
+        Handles a failed task by dispatching to the reflector agent to generate a corrective plan.
+        """
+        workflow = workflow_manager.get_workflow(workflow_id)
+        if not workflow:
+            logger.error(f"Cannot handle failure for workflow '{workflow_id}': not found.")
+            return
+
+        failed_task = workflow.get_task(task_id)
+        if not failed_task:
+            logger.error(f"Cannot handle failure for task '{task_id}': not found in workflow.")
+            return
+
+        logger.info(f"Generating corrective plan for failed task '{task_id}'.")
+        
+        try:
+            # Create the prompt for the reflector agent
+            prompt = f"""
+            Original Goal: {workflow.original_prompt}
+            Failed Task: {failed_task.json()}
+            """
+            
+            # Dispatch to the reflector agent and await the new plan
+            correction_task_id = task_dispatcher.dispatch_task(
+                prompt=prompt,
+                agent_personality="reflector_agent"
+            )
+            new_plan_json_str = await task_dispatcher.await_task_result(correction_task_id, timeout=60)
+            
+            new_tasks_data = json.loads(new_plan_json_str)
+            
+            # Patch the workflow with the new plan
+            if new_tasks_data:
+                workflow_manager.patch_workflow(workflow_id, task_id, new_tasks_data)
+                logger.info(f"Successfully patched workflow '{workflow_id}'. Resuming execution.")
+                
+                # Re-process the now-patched workflow to dispatch the new tasks
+                patched_workflow = workflow_manager.get_workflow(workflow_id)
+                self.process_workflow(patched_workflow)
+            else:
+                logger.warning("Reflector agent returned an empty plan. Failing workflow.")
+                workflow.status = WorkflowStatus.FAILED
+                workflow_manager.update_workflow(workflow)
+
+        except Exception as e:
+            logger.error(f"Self-correction failed for task '{task_id}': {e}", exc_info=True)
+            workflow.status = WorkflowStatus.FAILED
+            workflow_manager.update_workflow(workflow)
 
     def process_workflow(self, workflow: Workflow):
         """

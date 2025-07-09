@@ -51,6 +51,7 @@ from agentQ.reflector_agent import ReflectorAgent
 from agentQ.app.core.knowledgegraph_tool import text_to_gremlin_tool
 from agentQ.app.core.prompts import KNOWLEDGE_GRAPH_PROMPT_TEMPLATE
 from agentQ.knowledge_graph_agent import run_knowledge_graph_agent
+from agentQ.planner_agent import run_planner_agent
 from agentQ.app.core.devops_tools import (
     get_service_dependencies_tool, get_recent_deployments_tool, restart_service_tool,
     increase_replicas_tool, list_pods_tool, get_deployment_status_tool,
@@ -705,6 +706,9 @@ def run_agent():
 
             # Start the new knowledge graph agent
             threading.Thread(target=run_knowledge_graph_agent, args=(pulsar_client, qpulse_client, llm_config, context_manager), daemon=True).start()
+            
+            # Start the new planner agent
+            threading.Thread(target=run_planner_agent, args=(pulsar_client, qpulse_client, llm_config), daemon=True).start()
 
 
     except Exception as e:

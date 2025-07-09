@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pyignite import Client
 from pyignite.exceptions import PyIgniteError
 from pyignite.queries.op_codes import OP_CACHE_GET_OR_CREATE_WITH_CONFIGURATION
@@ -8,6 +8,7 @@ from pyignite.datatypes import String, Bool, Int, Map, ObjectArray, Collection, 
 from managerQ.app.models import Workflow, WorkflowStatus, TaskStatus
 from managerQ.app.config import settings
 from managerQ.app.api.dashboard_ws import manager as dashboard_manager
+from managerQ.app.models import WorkflowTask
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,43 @@ class WorkflowManager:
         # The value must be a dict to be compatible with Ignite's SQL engine
         self._cache.put(workflow.workflow_id, workflow.dict())
         logger.debug(f"Updated workflow: {workflow.workflow_id}")
+
+    def patch_workflow(self, workflow_id: str, failed_task_id: str, new_tasks: List[Dict[str, Any]]):
+        """
+        Inserts a list of new tasks into a workflow to correct a failure.
+        """
+        workflow = self.get_workflow(workflow_id)
+        if not workflow: return
+
+        failed_task = workflow.get_task(failed_task_id)
+        if not failed_task: return
+
+        # 1. Find tasks that depended on the failed task
+        downstream_tasks = [t for t in workflow.get_all_tasks_recursive() if failed_task_id in t.dependencies]
+
+        # 2. Identify the last task(s) in the new corrective plan
+        new_task_objects = [WorkflowTask(**t) for t in new_tasks]
+        new_task_ids = {t.task_id for t in new_task_objects}
+        final_new_task_ids = new_task_ids - {dep for t in new_task_objects for dep in t.dependencies}
+
+        # 3. Rewire downstream tasks to depend on the new final task(s)
+        for task in downstream_tasks:
+            task.dependencies.remove(failed_task_id)
+            task.dependencies.extend(list(final_new_task_ids))
+
+        # 4. Set the first task in the new plan to depend on the failed task's dependencies
+        if new_task_objects:
+            first_new_task = new_task_objects[0] # Assuming ordered plan for now
+            first_new_task.dependencies.extend(failed_task.dependencies)
+        
+        # 5. Add the new tasks to the workflow
+        workflow.tasks.extend(new_task_objects)
+        
+        # Mark the failed task as "corrected" or a similar status if we add one.
+        # For now, we leave it as FAILED.
+        
+        self.update_workflow(workflow)
+        logger.info(f"Patched workflow '{workflow_id}' with {len(new_tasks)} new tasks.")
 
     def get_all_running_workflows(self) -> list[Workflow]:
         """Retrieves all workflows with status 'RUNNING' using a SQL query."""
