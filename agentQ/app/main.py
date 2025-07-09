@@ -133,28 +133,34 @@ def load_config_from_vault(vault_client: VaultClient):
     """Loads configuration for the agent service from Vault."""
     try:
         config = vault_client.read_secret_data("secret/data/agentq/config")
+        # Fetch a service-to-service token for this agent
+        # This assumes a Vault role named 'agentq-role' is configured to generate tokens
+        # with an audience ('aud') claim for other services.
+        token_data = vault_client.get_token(role="agentq-role", ttl="1h")
+        config['service_token'] = token_data['auth']['client_token']
+        logger.info("Successfully fetched service-to-service token from Vault.")
         return config
     except Exception as e:
-        logger.critical(f"Failed to load agentq configuration from Vault: {e}", exc_info=True)
+        logger.critical(f"Failed to load agentq configuration or token from Vault: {e}", exc_info=True)
         raise
 
-def setup_agent_memory():
+def setup_agent_memory(config: dict):
     """
     Ensures the 'agent_memory' collection exists in VectorStoreQ on startup.
     """
     logger.info("Setting up agent memory collection in VectorStoreQ...")
     try:
         # This requires the service to have a valid token with an 'admin' or 'service-account' role.
-        # This part of the code is simplified and assumes such a token is available.
-        # In a real production system, this agent would use a service account token.
-        # For now, we will need to manually create this collection if auth fails.
-        # A better approach would be to have a proper service account mechanism.
+        service_token = config.get('service_token')
+        if not service_token:
+            logger.error("No service token found in config. Cannot set up agent memory.")
+            return
+
+        headers = {"Authorization": f"Bearer {service_token}"}
         
-        # TODO: Use a real service account token.
-        # This is a placeholder and will not work without a valid JWT.
-        headers = {"Authorization": "Bearer YOUR_SERVICE_ACCOUNT_TOKEN"}
-        
-        url = "http://localhost:8001/api/v1/management/create-collection"
+        # Use service discovery or a config setting for the URL
+        vectorstore_url = config.get('services', {}).get('vectorstoreq_url', 'http://localhost:8001')
+        url = f"{vectorstore_url}/api/v1/management/create-collection"
         
         payload = {
             "schema": {
@@ -471,7 +477,12 @@ def setup_default_agent(config: dict, vault_client: VaultClient):
         func=search_memory_tool.func,
         config=services_config
     ))
-    toolbox.register_tool(github_tool) # Requires more specific config, handle later
+    toolbox.register_tool(Tool(
+        name=github_tool.name,
+        description=github_tool.description,
+        func=github_tool.func,
+        config=config # Pass the full config, including the service token
+    ))
     toolbox.register_tool(generate_table_tool) # Does not require config
     toolbox.register_tool(list_tools_tool)
     toolbox.register_tool(Tool(
@@ -552,7 +563,13 @@ def run_agent():
     elif personality == "reflector":
         agent_id, task_topic, toolbox, llm_config, context_manager, qpulse_client = setup_reflector_agent(config, vault_client)
     else: # Default
-        agent_id, task_topic, toolbox, llm_config, context_manager, qpulse_client = setup_default_agent(config, vault_client)
+        agent_id = os.environ.get("AGENT_ID", f"agentq-default-{uuid.uuid4()}")
+        task_topic = f"persistent://public/default/q.agentq.tasks.{agent_id}"
+        toolbox = setup_default_agent(config, vault_client)
+        llm_config = config.get('llm', {})
+        context_manager = ContextManager(ignite_addresses=config['ignite']['addresses'], agent_id=agent_id)
+        context_manager.connect()
+        qpulse_client = QuantumPulseClient(base_url=config.get('services', {}).get('qpulse_url'))
 
 
     # The rest of the agent runs the same, regardless of personality
@@ -613,84 +630,7 @@ def run_agent():
                         time.sleep(5)
 
             # Setup for default agent
-            default_toolbox = Toolbox()
-            # Register all default tools
-            default_toolbox.register_tool(Tool(
-                name=vectorstore_tool.name,
-                description=vectorstore_tool.description,
-                func=vectorstore_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(human_tool) # Does not require config
-            default_toolbox.register_tool(Tool(
-                name=integrationhub_tool.name,
-                description=integrationhub_tool.description,
-                func=integrationhub_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(Tool(
-                name=knowledgegraph_tool.name,
-                description=knowledgegraph_tool.description,
-                func=knowledgegraph_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(Tool(
-                name=summarize_activity_tool.name,
-                description=summarize_activity_tool.description,
-                func=summarize_activity_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(Tool(
-                name=find_experts_tool.name,
-                description=find_experts_tool.description,
-                func=find_experts_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(Tool(
-                name=quantumpulse_tool.name,
-                description=quantumpulse_tool.description,
-                func=quantumpulse_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(Tool(
-                name=save_memory_tool.name,
-                description=save_memory_tool.description,
-                func=save_memory_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(Tool(
-                name=search_memory_tool.name,
-                description=search_memory_tool.description,
-                func=search_memory_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(github_tool) # Requires more specific config, handle later
-            default_toolbox.register_tool(generate_table_tool) # Does not require config
-            default_toolbox.register_tool(list_tools_tool)
-            default_toolbox.register_tool(Tool(
-                name=trigger_dag_tool.name,
-                description=trigger_dag_tool.description,
-                func=trigger_dag_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(Tool(
-                name=get_dag_status_tool.name,
-                description=get_dag_status_tool.description,
-                func=get_dag_status_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(Tool(
-                name=delegation_tool.name,
-                description=delegation_tool.description,
-                func=delegation_tool.func,
-                config=services_config
-            ))
-            default_toolbox.register_tool(Tool(
-                name=code_search_tool.name,
-                description=code_search_tool.description,
-                func=code_search_tool.func,
-                config=services_config
-            ))
+            default_toolbox = setup_default_agent(config, vault_client)
 
             default_consumer = pulsar_client.subscribe(task_topic, f"agentq-sub-{agent_id}")
             threading.Thread(target=consumer_loop, args=(default_consumer, default_toolbox), daemon=True).start()
@@ -738,5 +678,8 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
     
+    # Run setup tasks that need the event loop
+    setup_agent_memory(config)
+
     # Run the main agent loop
     run_agent()

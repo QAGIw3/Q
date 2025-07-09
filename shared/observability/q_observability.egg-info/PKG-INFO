@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: q_observability
+Version: 0.1.0
+Project-URL: Homepage, https://github.com/example/Q
+Classifier: Programming Language :: Python :: 3
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: opentelemetry-api
+Requires-Dist: opentelemetry-sdk
+Requires-Dist: opentelemetry-instrumentation-fastapi
+Requires-Dist: opentelemetry-exporter-otlp
+Requires-Dist: structlog
+Requires-Dist: q_pulsar_client
+
+# Q Observability Shared Library
+
+This package contains shared code for setting up observability (logging and tracing) across the Q Platform services. 

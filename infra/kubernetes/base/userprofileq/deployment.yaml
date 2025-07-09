@@ -1,0 +1,32 @@
+# infra/kubernetes/base/userprofileq/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: userprofileq-deployment
+  labels:
+    app: userprofileq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: userprofileq
+  template:
+    metadata:
+      labels:
+        app: userprofileq
+    spec:
+      containers:
+      - name: userprofileq
+        image: harbor.q-platform.dev/library/userprofileq:latest # Replace with your Harbor registry
+        ports:
+        - containerPort: 8000
+        env:
+        - name: CASSANDRA_HOSTS
+          value: "cassandra-service.database.svc.cluster.local" # Or from a ConfigMap
+        - name: CASSANDRA_KEYSPACE
+          value: "userprofilesq"
+        - name: LOG_LEVEL
+          value: "INFO"
+        # Volume mounts for secrets would go here if using Vault CSI driver
+      imagePullSecrets:
+      - name: harbor-registry-secret 

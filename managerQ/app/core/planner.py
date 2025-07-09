@@ -187,7 +187,7 @@ class Planner:
             g.V().hasLabel('Insight')
                  .has('embedding')
                  .order()
-                 .by(__.map(values('embedding')).map(l -> 점.l.stream().mapToDouble(d -> d.doubleValue()).toArray()), 
+                 .by(__.map(values('embedding')).map(l -> l.stream().mapToDouble(d -> d.doubleValue()).toArray()), 
                      T.closeTo, {json.dumps(prompt_embedding)})
                  .limit({top_k})
                  .values('lesson')

@@ -7,39 +7,32 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
-from app.core.config import config
-
-logger = logging.getLogger(__name__)
-
-def setup_tracing(app):
+def setup_tracing(app, service_name: str, otlp_endpoint: str = "http://localhost:4317"):
     """
-    Sets up OpenTelemetry tracing for the FastAPI application.
+    Configures OpenTelemetry tracing for a FastAPI application.
+
+    Args:
+        app: The FastAPI app instance to instrument.
+        service_name (str): The name of the service for resource attributes.
+        otlp_endpoint (str): The OTLP gRPC endpoint for the collector.
     """
-    if not config.otel.enabled:
-        logger.info("OpenTelemetry tracing is disabled.")
+    if not otlp_endpoint:
+        logging.getLogger(__name__).warning("OTLP_ENDPOINT not set, tracing is disabled.")
         return
 
-    logger.info("Setting up OpenTelemetry tracing...")
-
-    # Create a resource to identify the service
-    resource = Resource(attributes={
-        "service.name": config.service_name,
-        "service.version": config.version,
-    })
-
-    # Set up the tracer provider
-    tracer_provider = TracerProvider(resource=resource)
-    trace.set_tracer_provider(tracer_provider)
-
-    # Configure the OTLP exporter
-    exporter = OTLPSpanExporter(endpoint=config.otel.endpoint, insecure=True)
+    resource = Resource(attributes={"service.name": service_name})
+    provider = TracerProvider(resource=resource)
     
-    # Use a batch processor to send spans in batches
-    span_processor = BatchSpanProcessor(exporter)
-    tracer_provider.add_span_processor(span_processor)
+    # Use OTLPSpanExporter for gRPC
+    exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
+    
+    processor = BatchSpanProcessor(exporter)
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
 
-    # Instrument the FastAPI application if it's provided
     if app:
-        FastAPIInstrumentor.instrument_app(app)
+        FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
+        logging.getLogger(__name__).info(f"Tracing enabled for service '{service_name}' sending to '{otlp_endpoint}'.")
 
-    logger.info(f"OpenTelemetry tracing enabled. Exporting to {config.otel.endpoint}.")
+def get_tracer(name: str):
+    return trace.get_tracer(name)

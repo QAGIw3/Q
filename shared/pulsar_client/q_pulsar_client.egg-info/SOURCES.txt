@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+setup.py
+q_pulsar_client.egg-info/PKG-INFO
+q_pulsar_client.egg-info/SOURCES.txt
+q_pulsar_client.egg-info/dependency_links.txt
+q_pulsar_client.egg-info/requires.txt
+q_pulsar_client.egg-info/top_level.txt

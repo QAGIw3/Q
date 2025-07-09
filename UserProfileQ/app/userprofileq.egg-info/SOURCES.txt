@@ -1,0 +1,14 @@
+pyproject.toml
+setup.py
+app/api/__init__.py
+app/api/profiles.py
+app/core/__init__.py
+app/core/cassandra_client.py
+app/models/__init__.py
+app/models/profile.py
+app/userprofileq.egg-info/PKG-INFO
+app/userprofileq.egg-info/SOURCES.txt
+app/userprofileq.egg-info/dependency_links.txt
+app/userprofileq.egg-info/requires.txt
+app/userprofileq.egg-info/top_level.txt
+tests/test_profiles_api.py

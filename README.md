@@ -22,6 +22,9 @@ graph TD
         QP(QuantumPulse)
         VS(VectorStoreQ)
         KG(KnowledgeGraphQ)
+        ManagerQ(managerQ)
+        AgentQ(agentQ)
+        IntegrationHub(IntegrationHub)
     end
 
     subgraph "Infrastructure (Managed by Terraform)"
@@ -56,6 +59,10 @@ graph TD
     QP -- "Processes streams with" --> Flink
     QP -- "Uses for messaging" --> Pulsar
 
+    IntegrationHub -- "Triggers" --> ManagerQ
+    ManagerQ -- "Orchestrates" --> AgentQ
+    AgentQ -- "Executes tasks" --> H2M
+
     Actions -- "Publishes images to" --> Harbor
     
     classDef infra fill:#e6f3ff,stroke:#b3d9ff,stroke-width:2px;
@@ -87,9 +94,10 @@ Once the infrastructure is deployed, you can run the services and the web applic
 | **`KnowledgeGraphQ`**| Responsible for batch data processing and ingestion into the vector store. | [**`KnowledgeGraphQ/README.md`**](./KnowledgeGraphQ/README.md) |
 | **`AuthQ`** | The security pattern using Keycloak and Istio for platform-wide auth. | [**`AuthQ/README.md`**](./AuthQ/README.md) |
 | **`IntegrationHub`** | A service for connecting to and synchronizing with external systems. | [**`IntegrationHub/README.md`**](./IntegrationHub/README.md) |
+| **`agentQ`** | An autonomous agent for performing tasks. | [**`agentQ/README.md`**](./agentQ/README.md) |
+| **`managerQ`** | A service for managing and coordinating multiple agents. | [**`managerQ/README.md`**](./managerQ/README.md) |
 | **`infra/terraform`** | The Terraform project for deploying and managing all infrastructure. | [**`infra/terraform/README.md`**](./infra/terraform/README.md) |
-| `agentQ` | *Future Service*: An autonomous agent for performing tasks. | `agentQ/README.md` |
-| `managerQ` | *Future Service*: A service for managing and coordinating multiple agents. | `managerQ/README.md` |
+| `UserProfileQ` | *Future Service*: Manages user profiles and preferences. | `UserProfileQ/README.md` |
 | `ObservabilityStack`| *Future Service*: Will contain configurations for Prometheus, Grafana, etc. | `ObservabilityStack/README.md` |
 
 ## Proactive Agent Abilities

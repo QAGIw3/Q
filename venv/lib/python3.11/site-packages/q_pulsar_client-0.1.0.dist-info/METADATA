@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: q_pulsar_client
+Version: 0.1.0
+Project-URL: Homepage, https://github.com/example/Q
+Classifier: Programming Language :: Python :: 3
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: pulsar-client
+
+# Q Pulsar Client Shared Library
+
+This package provides a shared, memoized Pulsar client for use across the Q Platform. 

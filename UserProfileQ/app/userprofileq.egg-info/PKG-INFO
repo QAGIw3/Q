@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: userprofileq
+Version: 0.1.0
+Requires-Python: >=3.9
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: pydantic
+Requires-Dist: cassandra-driver
+Requires-Dist: python-dotenv
+Requires-Dist: q_observability
+Requires-Dist: q_auth_parser

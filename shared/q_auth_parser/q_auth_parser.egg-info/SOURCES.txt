@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+setup.py
+q_auth_parser.egg-info/PKG-INFO
+q_auth_parser.egg-info/SOURCES.txt
+q_auth_parser.egg-info/dependency_links.txt
+q_auth_parser.egg-info/requires.txt
+q_auth_parser.egg-info/top_level.txt

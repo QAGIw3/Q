@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic[email]
+pydantic-settings
+cassandra-driver
+python-dotenv
+q_observability
+q_auth_parser
+q_opentelemetry

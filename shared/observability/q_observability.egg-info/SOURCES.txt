@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+setup.py
+q_observability.egg-info/PKG-INFO
+q_observability.egg-info/SOURCES.txt
+q_observability.egg-info/dependency_links.txt
+q_observability.egg-info/requires.txt
+q_observability.egg-info/top_level.txt

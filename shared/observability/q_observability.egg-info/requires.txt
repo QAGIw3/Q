@@ -1,0 +1,6 @@
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi
+opentelemetry-exporter-otlp
+structlog
+q_pulsar_client

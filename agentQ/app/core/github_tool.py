@@ -6,10 +6,10 @@ from agentQ.app.core.toolbox import Tool
 
 logger = logging.getLogger(__name__)
 
-# --- Configuration ---
-INTEGRATION_HUB_URL = "http://localhost:8000"
+# The base URL can be loaded from config
+# INTEGRATION_HUB_URL = "http://localhost:8000" 
 
-def comment_on_pr(repo: str, pr_number: int, comment: str) -> str:
+def comment_on_pr(repo: str, pr_number: int, comment: str, config: Dict[str, Any]) -> str:
     """
     Posts a comment to a specific GitHub pull request.
 
@@ -17,18 +17,20 @@ def comment_on_pr(repo: str, pr_number: int, comment: str) -> str:
         repo (str): The repository name in 'owner/repo' format (e.g., 'my-org/my-project').
         pr_number (int): The number of the pull request.
         comment (str): The content of the comment to post.
+        config (Dict[str, Any]): The agent's configuration dictionary, containing service URLs and tokens.
     
     Returns:
         A string containing the result of the operation.
     """
     try:
-        url = f"{INTEGRATION_HUB_URL}/api/v1/flows/post_comment_on_pr/trigger"
+        integration_hub_url = config.get('services', {}).get('integrationhub_url', 'http://localhost:8000')
+        url = f"{integration_hub_url}/api/v1/flows/post_comment_on_pr/trigger"
         
-        # This assumes the IntegrationHub is secured and requires a token.
-        # The agent needs a mechanism to get a valid service account token.
-        # For now, this is simplified.
-        # TODO: Implement a secure way for the agent to get its own service token.
-        headers = {"Authorization": "Bearer YOUR_AGENT_SERVICE_TOKEN"}
+        service_token = config.get('service_token')
+        if not service_token:
+            return "Error: Agent is missing its service token for authentication."
+            
+        headers = {"Authorization": f"Bearer {service_token}"}
         
         payload = {
             "parameters": {

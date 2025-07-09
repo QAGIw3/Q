@@ -4,6 +4,8 @@ from pyignite import Client
 from pyignite.exceptions import PyIgniteError
 from pyignite.queries.op_codes import OP_CACHE_GET_OR_CREATE_WITH_CONFIGURATION
 from pyignite.datatypes import String, Bool, Int, Map, ObjectArray, Collection, prop_codes
+import pulsar
+import json
 
 from managerQ.app.models import Workflow, WorkflowStatus, TaskStatus
 from managerQ.app.config import settings
@@ -20,6 +22,8 @@ class WorkflowManager:
     def __init__(self):
         self._client = Client()
         self._cache = None
+        self._pulsar_client: Optional[pulsar.Client] = None
+        self._workflow_producer: Optional[pulsar.Producer] = None
         self.connect()
 
     def connect(self):
@@ -51,13 +55,26 @@ class WorkflowManager:
             
             self._cache = self._client.get_or_create_cache(schema)
             logger.info("WorkflowManager connected to Ignite and got or created cache 'workflows' with schema.")
+
+            # --- Pulsar Setup ---
+            self._pulsar_client = pulsar.Client(settings.pulsar.service_url)
+            self._workflow_producer = self._pulsar_client.create_producer(
+                settings.pulsar.topics.get("workflow_execution")
+            )
+            logger.info("WorkflowManager connected to Pulsar and created producer.")
+
         except PyIgniteError as e:
             logger.error(f"Failed to connect WorkflowManager to Ignite: {e}", exc_info=True)
+            raise
+        except Exception as e:
+            logger.error(f"Failed to connect WorkflowManager to Pulsar: {e}", exc_info=True)
             raise
 
     def close(self):
         if self._client.is_connected():
             self._client.close()
+        if self._pulsar_client:
+            self._pulsar_client.close()
 
     def create_workflow(self, workflow: Workflow) -> None:
         """Saves a new workflow to the cache."""
@@ -71,6 +88,21 @@ class WorkflowManager:
         but could have different logic in the future (e.g., for resuming).
         """
         self.create_workflow(workflow)
+        self.trigger_workflow_execution(workflow)
+
+    def trigger_workflow_execution(self, workflow: Workflow):
+        """Publishes the full workflow to the execution topic."""
+        if not self._workflow_producer:
+            logger.error("Cannot trigger workflow execution, Pulsar producer is not initialized.")
+            return
+
+        try:
+            workflow_json = workflow.json()
+            self._workflow_producer.send(workflow_json.encode('utf-8'), partition_key=workflow.workflow_id)
+            logger.info(f"Successfully published workflow {workflow.workflow_id} to execution topic.")
+        except Exception as e:
+            logger.error(f"Failed to publish workflow {workflow.workflow_id} to Pulsar: {e}", exc_info=True)
+
 
     def get_workflow(self, workflow_id: str) -> Optional[Workflow]:
         """Retrieves a workflow from the cache."""

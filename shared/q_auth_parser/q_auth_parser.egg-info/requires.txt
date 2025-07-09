@@ -1,0 +1,4 @@
+fastapi
+pydantic
+python-jose[cryptography]
+python-keycloak

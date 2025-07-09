@@ -1,0 +1,16 @@
+# infra/kubernetes/base/userprofileq/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: userprofileq-service
+  labels:
+    app: userprofileq
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: userprofileq 

@@ -7,11 +7,12 @@ namespace: q-platform
 
 # List of all the service manifests to include in the deployment
 resources:
-  - ./agentq
-  - ./h2m-service
-  - ./knowledgegraphq
-  - ./manager-q
-  - ./quantumpulse
-  - ./vectorstore-q
-  - ./webapp-q
-  - ./authq 
+  - agentq/
+  - authq/
+  - h2m-service/
+  - knowledgegraphq/
+  - manager-q/
+  - quantumpulse/
+  - vectorstore-q/
+  - webapp-q/
+  - userprofileq/ 

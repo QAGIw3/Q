@@ -1,0 +1,7 @@
+pyproject.toml
+setup.py
+q_opentelemetry.egg-info/PKG-INFO
+q_opentelemetry.egg-info/SOURCES.txt
+q_opentelemetry.egg-info/dependency_links.txt
+q_opentelemetry.egg-info/requires.txt
+q_opentelemetry.egg-info/top_level.txt

@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: q_opentelemetry
+Version: 0.1.0
+Requires-Python: >=3.9
+Requires-Dist: opentelemetry-api
+Requires-Dist: opentelemetry-sdk
+Requires-Dist: opentelemetry-instrumentation-fastapi
+Requires-Dist: opentelemetry-exporter-otlp

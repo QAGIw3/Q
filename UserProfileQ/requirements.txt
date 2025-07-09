@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+cassandra-driver
+python-dotenv
+# Shared libraries - these are installed from the shared directory in the Docker build
+# q_auth_parser
+# observability 

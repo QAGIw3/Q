@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+pydantic
+cassandra-driver
+python-dotenv
+q_observability
+q_auth_parser
