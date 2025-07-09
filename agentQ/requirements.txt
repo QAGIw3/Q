@@ -26,7 +26,5 @@ opentelemetry-instrumentation-requests==0.45b0
 # Shared Libraries
 pyyaml
 -e ./shared/q_auth_parser
- 
-# Shared Libraries
-pyyaml
--e ./shared/q_auth_parser
+-e ./shared/q_pulse_client
+-e ./shared/q_vectorstore_client

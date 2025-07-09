@@ -15,6 +15,7 @@ import uuid
 import json
 from opentelemetry import trace
 import structlog
+import httpx
 
 from shared.opentelemetry.tracing import setup_tracing
 from shared.observability.logging_config import setup_logging
@@ -26,6 +27,7 @@ from agentQ.app.core.human_tool import human_tool
 from agentQ.app.core.integrationhub_tool import integrationhub_tool
 from agentQ.app.core.knowledgegraph_tool import knowledgegraph_tool, summarize_activity_tool, find_experts_tool
 from agentQ.app.core.quantumpulse_tool import quantumpulse_tool
+from agentQ.app.core.memory_tool import save_memory_tool, search_memory_tool
 
 # Initialize tracing and logging
 setup_tracing(app=None)
@@ -52,7 +54,9 @@ Example `Action` objects:
 - To provide a final answer: `{"action": "finish", "answer": "The final answer to the user."}`
 - To call a tool: `{"action": "call_tool", "tool_name": "name_of_tool", "parameters": {"arg1": "value1", "arg2": "value2"}}`
 
-You can call tools sequentially to gather information. After each tool call, you will receive an "Observation" with the result. Use these observations to inform your next thought and action. Continue until you have enough information to provide a final answer.
+Before your first turn, a search will be automatically performed against your long-term memory based on the user's prompt. The results, if any, will be provided in the first "Tool Observation". Use this information to inform your initial thoughts.
+
+At the end of a successful conversation, you will be asked to provide a concise summary of the key information and facts. This summary will be saved to your long-term memory for future use.
 
 Here are the tools you have available:
 {tools}
@@ -86,6 +90,54 @@ def load_config():
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
+def setup_agent_memory():
+    """
+    Ensures the 'agent_memory' collection exists in VectorStoreQ on startup.
+    """
+    logger.info("Setting up agent memory collection in VectorStoreQ...")
+    try:
+        # This requires the service to have a valid token with an 'admin' or 'service-account' role.
+        # This part of the code is simplified and assumes such a token is available.
+        # In a real production system, this agent would use a service account token.
+        # For now, we will need to manually create this collection if auth fails.
+        # A better approach would be to have a proper service account mechanism.
+        
+        # TODO: Use a real service account token.
+        # This is a placeholder and will not work without a valid JWT.
+        headers = {"Authorization": "Bearer YOUR_SERVICE_ACCOUNT_TOKEN"}
+        
+        url = "http://localhost:8001/api/v1/management/create-collection"
+        
+        payload = {
+            "schema": {
+                "collection_name": "agent_memory",
+                "description": "Long-term memory for autonomous agents.",
+                "fields": [
+                    {"name": "memory_id", "dtype": "VarChar", "is_primary": True, "max_length": 36},
+                    {"name": "summary_text", "dtype": "VarChar", "max_length": 1000},
+                    {"name": "vector", "dtype": "FloatVector", "dim": 768}
+                ],
+                "enable_dynamic_field": False
+            },
+            "index": {
+                "field_name": "vector",
+                "index_type": "HNSW",
+                "metric_type": "COSINE"
+            }
+        }
+        
+        with httpx.Client() as client:
+            response = client.post(url, json=payload, headers=headers)
+            if response.status_code == 401 or response.status_code == 403:
+                logger.warning("Could not create 'agent_memory' collection due to auth error. This may need to be created manually.", status=response.status_code, response=response.text)
+            elif response.status_code not in [200, 201, 409]: # 409 Conflict is OK (already exists)
+                 response.raise_for_status()
+            logger.info("Agent memory setup check completed.", response=response.json())
+
+    except Exception as e:
+        logger.error("Failed to set up agent memory collection. The agent may not be able to remember past conversations.", error=str(e), exc_info=True)
+
+
 def register_with_manager(producer, agent_id, task_topic):
     """Sends a registration message to the manager."""
     logger.info("Registering agent", agent_id=agent_id, topic=task_topic)
@@ -103,6 +155,14 @@ def react_loop(prompt_data, context_manager, toolbox, client, llm_config):
     conversation_id = prompt_data.get("id") # Assuming prompt_id is the conversation_id
 
     history = context_manager.get_history(conversation_id)
+    
+    # --- Memory Retrieval Step ---
+    if not history: # Only search memory for the very first message
+        logger.info("New conversation, searching long-term memory...")
+        initial_memories = toolbox.execute_tool("search_memory", query=user_prompt)
+        # Prepend the conversation with the memory search result
+        history.append({"role": "system", "content": f"Tool Observation: {initial_memories}"})
+
     history.append({"role": "user", "content": user_prompt})
 
     max_turns = 5
@@ -134,6 +194,29 @@ def react_loop(prompt_data, context_manager, toolbox, client, llm_config):
         # 4. Execute the action
         if action_json.get("action") == "finish":
             final_answer = action_json.get("answer", "No answer provided.")
+            
+            # --- Memory Creation Step ---
+            try:
+                logger.info("Conversation finished. Generating summary for long-term memory.")
+                summarization_prompt = "Based on our conversation, please provide a concise, one-paragraph summary of the key facts, findings, and conclusions. This summary will be saved to your long-term memory. Focus on information that is likely to be useful in the future."
+                
+                # Use the existing history, but add the summarization request
+                summary_request_history = history + [{"role": "system", "content": summarization_prompt}]
+                
+                summary_completion = client.chat.completions.create(
+                    model=llm_config['model'],
+                    messages=summary_request_history
+                )
+                summary_text = summary_completion.choices[0].message.content
+                
+                if summary_text:
+                    logger.info("Saving conversation summary to memory.", summary=summary_text)
+                    # This is a synchronous call, but it's acceptable for now.
+                    # In a high-throughput system, this could be offloaded to a background task.
+                    toolbox.execute_tool("save_memory", summary=summary_text)
+            except Exception as e:
+                logger.error("Failed to generate and save conversation summary.", error=str(e), exc_info=True)
+
             context_manager.append_to_history(conversation_id, history)
             return final_answer
         elif action_json.get("action") == "call_tool":
@@ -153,6 +236,9 @@ def run_agent():
     pulsar_config = config['pulsar']
     llm_config = config['llm']
     
+    # Run setup tasks
+    setup_agent_memory()
+
     agent_id = f"agentq-{uuid.uuid4()}"
     task_topic = f"persistent://public/default/q.agentq.tasks.{agent_id}"
     subscription_name = f"agentq-sub-{agent_id}"
@@ -167,6 +253,8 @@ def run_agent():
     toolbox.register_tool(summarize_activity_tool)
     toolbox.register_tool(find_experts_tool)
     toolbox.register_tool(quantumpulse_tool)
+    toolbox.register_tool(save_memory_tool)
+    toolbox.register_tool(search_memory_tool)
     
     pulsar_client = None
     try:
