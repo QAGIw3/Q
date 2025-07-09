@@ -1,0 +1,5 @@
+keycloak:
+  server_url: "http://keycloak:8080/"
+  realm_name: "q-platform"
+  client_id: "authq-service"
+  client_secret: "YOUR_CLIENT_SECRET" # Replace with secret from Vault

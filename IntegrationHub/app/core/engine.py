@@ -1,57 +1,75 @@
 import logging
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
-from app.connectors.zulip.zulip_connector import ZulipConnector
-from app.connectors.smtp.email_connector import EmailConnector
+from app.models.connector import Connector, ConnectorAction
+from app.connectors.zulip.zulip_connector import zulip_connector
+from app.connectors.smtp.email_connector import email_connector
+from app.connectors.pulsar.pulsar_connector import pulsar_publisher_connector
 from app.core.vault_client import vault_client
 
-# In a real system, this would be more dynamic (e.g., using entrypoints)
-AVAILABLE_CONNECTORS = {
-    "zulip-message": ZulipConnector,
-    "smtp-email": EmailConnector,
+# A registry of all available connector instances
+AVAILABLE_CONNECTORS: Dict[str, Connector] = {
+    zulip_connector.connector_id: zulip_connector,
+    email_connector.connector_id: email_connector,
+    pulsar_publisher_connector.connector_id: pulsar_publisher_connector,
 }
 
 class FlowExecutionEngine:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
 
-    async def _execute_step(self, step_config: Dict[str, Any]):
+    async def _execute_step(self, step_config: Dict[str, Any], data_context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         connector_id = step_config.get("connector_id")
         credential_id = step_config.get("credential_id")
+        action_id = step_config.get("action_id", "default_action") # Default action if not specified
         step_params = step_config.get("configuration", {})
 
         if connector_id not in AVAILABLE_CONNECTORS:
             raise ValueError(f"Connector '{connector_id}' not found.")
 
-        # Get credentials from Vault
-        credentials = await vault_client.get_credential(credential_id)
+        connector = AVAILABLE_CONNECTORS[connector_id]
         
-        # Initialize the connector with credentials
-        ConnectorClass = AVAILABLE_CONNECTORS[connector_id]
-        # The credential 'secrets' dict should match the connector's expected config
-        connector = ConnectorClass(credentials.secrets)
+        # Prepare action for the connector
+        action = ConnectorAction(
+            action_id=action_id,
+            credential_id=credential_id,
+            configuration=step_params
+        )
+
+        # Pass the context from the previous step to the current step
+        # A more advanced engine would have better data mapping (e.g., using JMESPath)
+        merged_params = {**step_params, **data_context}
+        action.configuration = merged_params
         
-        # Here we assume a 'send' method. A more robust implementation
-        # would have a BaseConnector with abstract methods.
-        connector.send(**step_params)
-        
-        self.logger.info(f"Successfully executed step: {step_config.get('name')}")
+        self.logger.info(f"Executing action '{action.action_id}' on connector '{connector.connector_id}'")
+
+        # Execute and return the result, which will become the context for the next step
+        result = await connector.execute(action, configuration=action.configuration, data_context=data_context)
+        return result
 
     async def run_flow(self, flow: Dict[str, Any], data_context: Dict[str, Any]):
         self.logger.info(f"--- Running Flow: {flow.get('name')} ---")
-        self.logger.info(f"    Initial data context: {data_context}")
+        
+        current_context = data_context
+        self.logger.info(f"    Initial data context: {current_context}")
+
         for step in flow.get("steps", []):
             self.logger.info(f"  - Executing step: {step.get('name')}")
             try:
-                await self._execute_step(step)
-            except (ValueError, RuntimeError, Exception) as e:
-                self.logger.error(f"    ERROR: Step '{step.get('name')}' failed: {e}")
+                # The output of a step becomes the input context for the next
+                step_result = await self._execute_step(step, current_context)
+                
+                if step_result:
+                    current_context = {**current_context, **step_result} # Merge results into context
+
+                self.logger.info(f"    Step '{step.get('name')}' completed. New context keys: {list(step_result.keys()) if step_result else []}")
+
+            except Exception as e:
+                self.logger.error(f"    ERROR: Step '{step.get('name')}' failed: {e}", exc_info=True)
                 # In a real engine, we'd have error handling, retries, etc.
-                break # Stop flow on first failure for this PoC
-        self.logger.info(f"--- Flow Finished: {flow.get('name')} ---") 
+                break # Stop flow on first failure
+        self.logger.info(f"--- Flow Finished: {flow.get('name')} ---")
+
+
+engine = FlowExecutionEngine() 

@@ -3,7 +3,7 @@ import logging
 
 from shared.q_vectorstore_client.models import UpsertRequest
 from app.core.milvus_handler import milvus_handler
-from shared.q_auth_parser.parser import get_user_claims
+from shared.q_auth_parser.parser import get_current_user
 from shared.q_auth_parser.models import UserClaims
 
 # Configure logging
@@ -16,14 +16,14 @@ AUTHORIZED_ROLES = {"admin", "service-account"}
 @router.post("/upsert", status_code=status.HTTP_202_ACCEPTED)
 async def upsert_vectors(
     request: UpsertRequest,
-    claims: UserClaims = Depends(get_user_claims)
+    user: UserClaims = Depends(get_current_user)
 ):
     """
     Accepts a batch of vectors and upserts them into the specified Milvus collection.
     Requires 'admin' or 'service-account' role.
     """
     # Simple role-based authorization
-    user_roles = set(claims.realm_access.roles)
+    user_roles = set(user.roles)
     if not AUTHORIZED_ROLES.intersection(user_roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -31,7 +31,7 @@ async def upsert_vectors(
         )
 
     try:
-        logger.info(f"Received upsert request for collection '{request.collection_name}' with {len(request.vectors)} from user '{claims.sub}'.")
+        logger.info(f"Received upsert request for collection '{request.collection_name}' with {len(request.vectors)} vectors from user '{user.username}'.")
         result = milvus_handler.upsert(request.collection_name, request.vectors)
         return {
             "message": "Upsert request accepted and processed.",

@@ -35,4 +35,11 @@ structlog
 # They are listed here for reference.
 # -e ./shared/q_auth_parser
 # -e ./shared/q_vectorstore_client
-# -e ./shared/q_pulse_client 
+# -e ./shared/q_pulse_client  
+# Shared Libraries
+pyyaml
+-e ./shared/q_auth_parser
+ 
+# Shared Libraries
+pyyaml
+-e ./shared/q_auth_parser

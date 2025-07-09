@@ -1,71 +1,24 @@
-import React, { useState, useEffect, useRef, useContext } from 'react';
-import { Box, TextField, Button, Paper, Typography, AppBar, Toolbar, CircularProgress, Container, Alert } from '@mui/material';
-import { AuthContext } from './AuthContext';
-import { jwtDecode } from 'jwt-decode';
+import React, { useContext } from 'react';
+import { BrowserRouter as Router, Route, Routes, Link, Navigate } from 'react-router-dom';
+import { Box, Typography, AppBar, Toolbar, Button, CircularProgress, Container } from '@mui/material';
+import { AuthContext, AuthProvider } from './AuthContext';
+import Chat from './components/Chat/Chat';
 
-interface Message {
-  sender: 'user' | 'ai' | 'agent_question';
-  text: string;
+function Home() {
+  return (
+    <Container maxWidth="md" sx={{ textAlign: 'center', mt: 8 }}>
+      <Typography variant="h2" component="h1" gutterBottom>
+        Welcome to the Q Platform
+      </Typography>
+      <Typography variant="h5">
+        An advanced, AI-powered platform for the future.
+      </Typography>
+    </Container>
+  );
 }
 
 function App() {
   const authContext = useContext(AuthContext);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [isReplyingToAgent, setIsReplyingToAgent] = useState(false);
-  const ws = useRef<WebSocket | null>(null);
-
-  useEffect(() => {
-    if (authContext?.isAuthenticated && authContext.token) {
-      // The token from keycloak is the JWT. We need the payload for the ws query.
-      const decoded: any = jwtDecode(authContext.token);
-      const claimsBase64 = btoa(JSON.stringify(decoded));
-      
-      const wsUrl = `ws://localhost:8002/chat/ws?claims=${claimsBase64}`;
-      ws.current = new WebSocket(wsUrl);
-
-      ws.current.onopen = () => console.log("WebSocket connected");
-      ws.current.onclose = () => console.log("WebSocket disconnected");
-
-      ws.current.onmessage = (event) => {
-        const receivedMessage = JSON.parse(event.data);
-        
-        if (receivedMessage.type === 'clarification_request') {
-          setMessages((prev) => [...prev, { sender: 'agent_question', text: receivedMessage.question }]);
-          setIsReplyingToAgent(true);
-        } else {
-          setMessages((prev) => [...prev, { sender: 'ai', text: receivedMessage.text }]);
-          setIsReplyingToAgent(false); // A normal AI response means we are no longer in a reply state
-        }
-
-        if (receivedMessage.conversation_id) {
-          setConversationId(receivedMessage.conversation_id);
-        }
-      };
-
-      return () => {
-        ws.current?.close();
-      };
-    }
-  }, [authContext?.isAuthenticated, authContext?.token]);
-
-  const handleSend = () => {
-    if (input.trim() && ws.current?.readyState === WebSocket.OPEN) {
-      const message = {
-        text: input,
-        conversation_id: conversationId,
-        is_human_response: isReplyingToAgent,
-      };
-      ws.current.send(JSON.stringify(message));
-      setMessages((prev) => [...prev, { sender: 'user', text: input }]);
-      setInput('');
-      // After sending a reply, we go back to normal conversation mode
-      if (isReplyingToAgent) {
-        setIsReplyingToAgent(false);
-      }
-    }
-  };
 
   if (!authContext?.isAuthenticated) {
     return (
@@ -77,52 +30,43 @@ function App() {
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: '#f5f5f5' }}>
-      <AppBar position="static">
-        <Toolbar>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            Q Platform Chat
-          </Typography>
-          <Button color="inherit" onClick={authContext.logout}>Logout</Button>
-        </Toolbar>
-      </AppBar>
-      <Container maxWidth="md" sx={{ flexGrow: 1, py: 2 }}>
-        <Paper elevation={3} sx={{ height: 'calc(100vh - 200px)', overflowY: 'auto', p: 2, display: 'flex', flexDirection: 'column-reverse' }}>
-          {/* Messages will be reversed in CSS, so map normally */}
-          <Box>
-            {messages.map((msg, index) => {
-              if (msg.sender === 'agent_question') {
-                return (
-                  <Alert key={index} severity="info" sx={{ my: 1 }}>
-                    <Typography variant="body1"><strong>The agent is asking:</strong> {msg.text}</Typography>
-                  </Alert>
-                );
-              }
-              return (
-                <Box key={index} my={1} display="flex" justifyContent={msg.sender === 'user' ? 'flex-end' : 'flex-start'}>
-                  <Paper elevation={1} sx={{ p: 1.5, bgcolor: msg.sender === 'user' ? 'primary.main' : 'grey.300', color: msg.sender === 'user' ? 'primary.contrastText' : 'inherit', maxWidth: '70%' }}>
-                    <Typography variant="body1">{msg.text}</Typography>
-                  </Paper>
-                </Box>
-              );
-            })}
-          </Box>
-        </Paper>
-        <Box component="form" sx={{ mt: 2, display: 'flex' }} onSubmit={(e) => { e.preventDefault(); handleSend(); }}>
-          <TextField
-            fullWidth
-            variant="outlined"
-            placeholder="Type a message..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-          />
-          <Button type="submit" variant="contained" color="primary" sx={{ ml: 1, px: 4 }}>
-            Send
-          </Button>
-        </Box>
-      </Container>
-    </Box>
+    <Router>
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: '#f5f5f5' }}>
+        <AppBar position="static">
+          <Toolbar>
+            <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+              <Link to="/" style={{ textDecoration: 'none', color: 'inherit' }}>Q Platform</Link>
+            </Typography>
+            <Button color="inherit" component={Link} to="/chat">Chat</Button>
+            <Button color="inherit" onClick={authContext.logout}>Logout</Button>
+          </Toolbar>
+        </AppBar>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/chat" element={
+            <RequireAuth>
+              <Chat />
+            </RequireAuth>
+          } />
+        </Routes>
+      </Box>
+    </Router>
   );
 }
 
-export default App;
+function RequireAuth({ children }: { children: JSX.Element }) {
+  const authContext = useContext(AuthContext);
+  if (!authContext || !authContext.isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
+// Wrap App with AuthProvider
+const AppWithAuth = () => (
+  <AuthProvider>
+    <App />
+  </AuthProvider>
+);
+
+export default AppWithAuth;

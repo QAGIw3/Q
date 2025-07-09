@@ -16,3 +16,11 @@ opentelemetry-sdk==1.24.0
 opentelemetry-instrumentation-fastapi==0.45b0
 prometheus-client
 structlog
+ 
+# Shared Libraries
+pyyaml
+-e ./shared/q_auth_parser
+ 
+# Shared Libraries
+pyyaml
+-e ./shared/q_auth_parser

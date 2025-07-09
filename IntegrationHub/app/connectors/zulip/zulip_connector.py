@@ -1,64 +1,79 @@
 import zulip
-import re
-from typing import Dict, Any
+import logging
+from typing import Dict, Any, Optional
 
-def _get_value_from_context(key: str, context: Dict[str, Any]):
-    """
-    Retrieves a nested value from a dictionary using dot notation.
-    e.g., key='user.name' -> context['user']['name']
-    """
-    try:
-        for k in key.split('.'):
-            context = context[k]
-        return context
-    except (KeyError, TypeError):
-        return None
+from app.models.connector import BaseConnector, ConnectorAction
+from app.core.vault_client import vault_client
 
-def _render_template(template_string: str, context: Dict[str, Any]) -> str:
-    """
-    Renders a simple template string with values from a context dictionary.
-    Replaces all occurrences of `{{ key.path }}` with the corresponding value.
-    """
-    # Find all placeholders like {{ key.path }}
-    placeholders = re.findall(r"\{\{([\w\s\.]*)\}\}", template_string)
-    
-    for placeholder in placeholders:
-        key = placeholder.strip()
-        value = _get_value_from_context(key, context)
-        # Replace the placeholder with the value, handle non-string values
-        template_string = template_string.replace(f"{{{{ {key} }}}}", str(value) if value is not None else "")
-        
-    return template_string
+logger = logging.getLogger(__name__)
 
-class ZulipSink:
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.client = None
+class ZulipConnector(BaseConnector):
+    """
+    A connector for interacting with the Zulip API.
+    Supports sending messages and fetching recent messages.
+    """
 
-    def write(self, data: Dict[str, Any]):
-        """
-        Sends a message to the configured Zulip stream and topic.
-        The message content is templated with data from the `data` context.
-        """
-        self.client = zulip.Client(
-            email=self.config.get("email"),
-            api_key=self.config.get("api_key"),
-            site=self.config.get("site")
+    @property
+    def connector_id(self) -> str:
+        return "zulip"
+
+    async def _get_client(self, credential_id: str) -> zulip.Client:
+        """Helper to get an authenticated Zulip client."""
+        credentials = await vault_client.get_credential(credential_id)
+        return zulip.Client(
+            email=credentials.secrets.get("email"),
+            api_key=credentials.secrets.get("api_key"),
+            site=credentials.secrets.get("site")
         )
 
-        message_template = self.config.get("content", "A flow step was triggered.")
-        message_content = _render_template(message_template, data)
+    async def execute(self, action: ConnectorAction, configuration: Dict[str, Any], data_context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        client = await self._get_client(action.credential_id)
 
+        if action.action_id == "send-message":
+            return await self._send_message(client, configuration)
+        elif action.action_id == "get-messages":
+            return await self._get_messages(client, configuration)
+        else:
+            raise ValueError(f"Unsupported action for Zulip connector: {action.action_id}")
+
+    async def _send_message(self, client: zulip.Client, config: Dict[str, Any]) -> None:
+        """Sends a message to a Zulip stream."""
         request = {
             "type": "stream",
-            "to": self.config.get("stream"),
-            "topic": self.config.get("topic"),
-            "content": message_content,
+            "to": config.get("stream"),
+            "topic": config.get("topic"),
+            "content": config.get("content", "A flow step was triggered."),
         }
-
-        result = self.client.send_message(request)
+        result = client.send_message(request)
         if result.get("result") != "success":
             raise RuntimeError(f"Failed to send message to Zulip: {result.get('msg')}")
+        logger.info("Successfully sent message to Zulip.")
+        return None
 
-def get_connector(*args, **kwargs):
-    return ZulipSink(*args, **kwargs)
+    async def _get_messages(self, client: zulip.Client, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Fetches recent messages from a Zulip stream."""
+        num_before = config.get("num_before", 20)
+        num_after = config.get("num_after", 0)
+        
+        request = {
+            "anchor": "newest",
+            "num_before": num_before,
+            "num_after": num_after,
+            "narrow": [
+                {"operator": "stream", "operand": config.get("stream")}
+            ]
+        }
+        if config.get("topic"):
+            request["narrow"].append({"operator": "topic", "operand": config.get("topic")})
+            
+        result = client.get_messages(request)
+
+        if result.get("result") != "success":
+            raise RuntimeError(f"Failed to get messages from Zulip: {result.get('msg')}")
+
+        logger.info(f"Successfully fetched {len(result['messages'])} messages from Zulip.")
+        # Return the messages so they can be used in the next step
+        return {"messages": result["messages"]}
+
+# Instantiate a single instance of the connector for the engine to use
+zulip_connector = ZulipConnector()

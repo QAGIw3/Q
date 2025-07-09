@@ -7,7 +7,7 @@ from app.core.orchestrator import orchestrator
 from app.core.connection_manager import manager
 from app.core.human_feedback import human_feedback_listener
 from app.services.h2m_pulsar import h2m_pulsar_client
-from shared.q_auth_parser.parser import get_user_claims_ws
+from shared.q_auth_parser.parser import get_current_user_ws
 from shared.q_auth_parser.models import UserClaims
 
 # Configure logging
@@ -30,7 +30,7 @@ if human_feedback_listener:
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    claims: UserClaims = Depends(get_user_claims_ws)
+    user: UserClaims = Depends(get_current_user_ws)
 ):
     # The initial connection does not have a conversation_id yet.
     # We will use a temporary one until the first message is processed.
@@ -42,12 +42,11 @@ async def websocket_endpoint(
         initial_data = await websocket.receive_json()
         request = ChatRequest(**initial_data)
         
-        user_id = claims.sub
         current_conversation_id = request.conversation_id
 
         # Handle the very first message to get a stable conversation_id
         ai_response, conv_id = await orchestrator.handle_message(
-            user_id=user_id,
+            user_id=user.user_id,
             text=request.text,
             conversation_id=current_conversation_id
         )
@@ -74,7 +73,7 @@ async def websocket_endpoint(
 
             # Otherwise, it's a normal chat message
             ai_response, conv_id = await orchestrator.handle_message(
-                user_id=user_id,
+                user_id=user.user_id,
                 text=request.text,
                 conversation_id=conv_id # Use the established conv_id
             )

@@ -5,6 +5,8 @@ import logging
 from app.models.inference import InferenceRequest
 from app.core.pulsar_client import PulsarManager, get_pulsar_manager
 from app.core.config import config
+from shared.q_auth_parser.parser import get_current_user
+from shared.q_auth_parser.models import UserClaims
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,7 +19,8 @@ REQUEST_TOPIC = config.pulsar.topics.requests
 async def create_inference_request(
     request: InferenceRequest,
     background_tasks: BackgroundTasks,
-    pulsar_manager: PulsarManager = Depends(get_pulsar_manager)
+    pulsar_manager: PulsarManager = Depends(get_pulsar_manager),
+    user: UserClaims = Depends(get_current_user)
 ):
     """
     Accepts an inference request and publishes it to the message queue for processing.
@@ -32,7 +35,7 @@ async def create_inference_request(
             request=request
         )
         
-        logger.info(f"Accepted inference request {request.request_id}. Publishing to topic {REQUEST_TOPIC}.")
+        logger.info(f"Accepted inference request {request.request_id} from user '{user.username}'. Publishing to topic {REQUEST_TOPIC}.")
 
         return {
             "message": "Inference request accepted for processing.",

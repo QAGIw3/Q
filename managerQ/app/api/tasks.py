@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 import logging
 import uuid
 import time
@@ -6,6 +6,9 @@ import time
 from pydantic import BaseModel
 from managerQ.app.core.task_dispatcher import task_dispatcher
 from managerQ.app.core.result_listener import result_listener
+
+from shared.q_auth_parser.parser import get_current_user
+from shared.q_auth_parser.models import UserClaims
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -22,7 +25,10 @@ class TaskResponse(BaseModel):
     llm_model: str
 
 @router.post("", response_model=TaskResponse)
-async def submit_task(request: TaskRequest):
+async def submit_task(
+    request: TaskRequest,
+    user: UserClaims = Depends(get_current_user)
+):
     """
     Submits a task to an available agent and waits for the result.
     """
@@ -37,7 +43,9 @@ async def submit_task(request: TaskRequest):
         "id": task_id,
         "prompt": request.prompt,
         "model": request.model,
-        "timestamp": int(time.time() * 1000)
+        "timestamp": int(time.time() * 1000),
+        "user_id": user.user_id,
+        "username": user.username,
     }
 
     try:

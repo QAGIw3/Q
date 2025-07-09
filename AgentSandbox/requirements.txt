@@ -9,3 +9,11 @@ fastavro==1.9.4
 # Observability
 prometheus-client
 structlog
+ 
+# Shared Libraries
+pyyaml
+-e ./shared/q_auth_parser
+ 
+# Shared Libraries
+pyyaml
+-e ./shared/q_auth_parser

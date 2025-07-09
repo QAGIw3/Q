@@ -22,3 +22,11 @@ opentelemetry-instrumentation-requests==0.45b0
 
 # Shared Libraries (install in editable mode)
 # -e ./shared/q_vectorstore_client
+ 
+# Shared Libraries
+pyyaml
+-e ./shared/q_auth_parser
+ 
+# Shared Libraries
+pyyaml
+-e ./shared/q_auth_parser

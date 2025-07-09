@@ -24,7 +24,7 @@ from agentQ.app.core.toolbox import Toolbox, Tool
 from agentQ.app.core.vectorstore_tool import vectorstore_tool
 from agentQ.app.core.human_tool import human_tool
 from agentQ.app.core.integrationhub_tool import integrationhub_tool
-from agentQ.app.core.knowledgegraph_tool import knowledgegraph_tool
+from agentQ.app.core.knowledgegraph_tool import knowledgegraph_tool, summarize_activity_tool, find_experts_tool
 from agentQ.app.core.quantumpulse_tool import quantumpulse_tool
 
 # Initialize tracing and logging
@@ -164,6 +164,8 @@ def run_agent():
     toolbox.register_tool(human_tool)
     toolbox.register_tool(integrationhub_tool)
     toolbox.register_tool(knowledgegraph_tool)
+    toolbox.register_tool(summarize_activity_tool)
+    toolbox.register_tool(find_experts_tool)
     toolbox.register_tool(quantumpulse_tool)
     
     pulsar_client = None

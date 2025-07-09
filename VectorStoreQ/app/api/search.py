@@ -3,7 +3,7 @@ import logging
 
 from shared.q_vectorstore_client.models import SearchRequest, SearchResponse
 from app.core.milvus_handler import milvus_handler
-from shared.q_auth_parser.parser import get_user_claims
+from shared.q_auth_parser.parser import get_current_user
 from shared.q_auth_parser.models import UserClaims
 
 # Configure logging
@@ -14,14 +14,14 @@ router = APIRouter()
 @router.post("", response_model=SearchResponse)
 async def search_vectors(
     request: SearchRequest,
-    claims: UserClaims = Depends(get_user_claims)
+    user: UserClaims = Depends(get_current_user)
 ):
     """
     Accepts a batch of search queries and performs similarity search on the specified Milvus collection.
     Requires any authenticated user.
     """
     try:
-        logger.info(f"Received search request for collection '{request.collection_name}' with {len(request.queries)} queries from user '{claims.sub}'.")
+        logger.info(f"Received search request for collection '{request.collection_name}' with {len(request.queries)} queries from user '{user.username}'.")
         results = milvus_handler.search(request.collection_name, request.queries)
         return SearchResponse(results=results)
     except ValueError as ve:

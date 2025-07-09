@@ -10,3 +10,11 @@ sentence-transformers
 torch
 httpx
 structlog
+ 
+# Shared Libraries
+pyyaml
+-e ./shared/q_auth_parser
+ 
+# Shared Libraries
+pyyaml
+-e ./shared/q_auth_parser

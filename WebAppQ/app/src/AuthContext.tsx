@@ -5,6 +5,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   token: string | undefined;
   claims: any; // You can define a more specific type for claims
+  login: () => void;
   logout: () => void;
 }
 
@@ -35,12 +36,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     initAuth();
   }, []);
 
+  const login = () => {
+    keycloak.login();
+  };
+
   const logout = () => {
     keycloak.logout();
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, token, claims, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, token, claims, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

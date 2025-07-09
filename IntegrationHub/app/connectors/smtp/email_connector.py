@@ -1,48 +1,46 @@
 import logging
 import emails
 from emails.template import JinjaTemplate
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+from app.models.connector import BaseConnector, ConnectorAction
+from app.core.vault_client import vault_client
 
 logger = logging.getLogger(__name__)
 
-class EmailConnector:
+class EmailConnector(BaseConnector):
     """A connector for sending emails via SMTP."""
 
-    def __init__(self, smtp_config: Dict[str, Any]):
-        """
-        Initializes the connector with SMTP server details.
-        
-        Args:
-            smtp_config: A dict with keys like 'host', 'port', 'user', 'password', 'tls'.
-        """
-        self.smtp_config = smtp_config
-        logger.info(f"EmailConnector initialized for host {smtp_config.get('host')}")
+    @property
+    def connector_id(self) -> str:
+        return "smtp-email"
 
-    def send(self, to: str, subject: str, body: str) -> Dict[str, Any]:
-        """
-        Sends an email.
+    async def execute(self, action: ConnectorAction, configuration: Dict[str, Any], data_context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if action.action_id != "send":
+            raise ValueError(f"Unsupported action for Email connector: {action.action_id}")
+
+        # Get SMTP credentials from Vault
+        smtp_credentials = await vault_client.get_credential(action.credential_id)
         
-        Args:
-            to: The recipient's email address.
-            subject: The email subject.
-            body: The email body (can be HTML).
-            
-        Returns:
-            The response from the SMTP server.
-        """
+        # Merge credentials with other SMTP settings (like host/port)
+        smtp_config = {**smtp_credentials.secrets, **configuration.get("smtp_server", {})}
+
         message = emails.Message(
-            subject=JinjaTemplate(subject),
-            html=JinjaTemplate(body),
+            subject=JinjaTemplate(configuration["subject"]),
+            html=JinjaTemplate(configuration["body"]),
             mail_from=("Q Platform", "noreply@q-platform.dev")
         )
         
         try:
             response = message.send(
-                to=to,
-                smtp=self.smtp_config
+                to=configuration["to"],
+                smtp=smtp_config
             )
-            logger.info(f"Successfully sent email to {to} with subject '{subject}'")
-            return {"status_code": response.status_code, "response": str(response.response)}
+            logger.info(f"Successfully sent email to {configuration['to']} with subject '{configuration['subject']}'")
+            return {"status": "sent", "response_code": response.status_code}
         except Exception as e:
-            logger.error(f"Failed to send email to {to}: {e}", exc_info=True)
-            raise 
+            logger.error(f"Failed to send email to {configuration['to']}: {e}", exc_info=True)
+            raise
+
+# Instantiate a single instance
+email_connector = EmailConnector() 
