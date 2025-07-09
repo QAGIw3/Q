@@ -11,6 +11,8 @@ import structlog
 from app.api import chat
 from app.core.config import config
 from app.services.ignite_client import ignite_client
+from app.services.h2m_pulsar import h2m_pulsar_client
+from app.core.human_feedback import HumanFeedbackListener, human_feedback_listener as hfl_instance
 from shared.observability.logging_config import setup_logging
 from shared.observability.metrics import setup_metrics
 
@@ -30,24 +32,31 @@ setup_metrics(app, app_name=config.service_name)
 
 @app.on_event("startup")
 async def startup_event():
-    """
-    Connects to Apache Ignite on application startup.
-    """
-    logger.info("Application startup...")
+    """Initializes and starts all background services."""
+    global hfl_instance
+    logger.info("H2M starting up...")
     try:
         await ignite_client.connect()
+        
+        hfl_instance = HumanFeedbackListener(
+            service_url=config.pulsar.service_url,
+            topic=config.pulsar.topics.human_feedback_topic
+        )
+        hfl_instance.start()
+        
+        h2m_pulsar_client.start_producer()
+
     except Exception as e:
-        logger.critical(f"Could not connect to Ignite on startup: {e}", exc_info=True)
-        # Consider exiting if the cache is essential
-        # exit(1)
+        logger.critical(f"Could not initialize H2M services on startup: {e}", exc_info=True)
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """
-    Disconnects from Ignite on application shutdown.
-    """
-    logger.info("Application shutdown...")
+    """Stops all background services gracefully."""
+    logger.info("H2M shutting down...")
     await ignite_client.disconnect()
+    if hfl_instance:
+        hfl_instance.stop()
+    h2m_pulsar_client.close()
 
 # Include the API router
 app.include_router(chat.router, prefix="/chat", tags=["Chat"])

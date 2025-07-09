@@ -14,17 +14,15 @@ Its core responsibilities are:
 
 ## Architecture
 
-H2M sits at the center of several other services, coordinating their capabilities to deliver a cohesive experience. The architecture now features a fully functional Retrieval-Augmented Generation (RAG) pipeline.
+H2M sits at the center of several other services, coordinating their capabilities to deliver a cohesive experience. The architecture now features a fully functional Retrieval-Augmented Generation (RAG) pipeline and a complete Human-in-the-Loop communication channel.
 
-1.  **API Layer (FastAPI)**: Exposes a secure WebSocket endpoint for clients.
-2.  **Conversation Orchestrator**: The core logic of the service. For each message, it performs the following steps:
-    a.  Calls the **Context Manager** to retrieve the user's past conversation history from **Apache Ignite**.
-    b.  Invokes the **RAG Module**, which now **generates a real-time vector embedding** of the user's query and sends it to **VectorStoreQ** to find genuinely relevant document chunks.
-    c.  Constructs a final, context-rich prompt using a Jinja2 template.
-    d.  Submits this prompt to **QuantumPulse** for inference by a large language model.
-    e.  Receives the final response from the LLM (in this simulation, it's faked).
-    f.  Saves the new user message and AI response back to the conversation history.
-    g.  Streams the final response back to the client.
+1.  **API Layer (FastAPI & WebSockets)**: Exposes a secure WebSocket endpoint for clients.
+2.  **Conversation Orchestrator**: The core logic of the service.
+3.  **Human Feedback Loop**:
+    -   A `HumanFeedbackListener` runs in the background, consuming from a Pulsar topic where agents send clarification questions.
+    -   A `ConnectionManager` tracks active user WebSocket connections.
+    -   When a question for a specific conversation arrives, the listener forwards it to the correct user via their WebSocket connection.
+    -   When the user replies, the API sends their answer back to a "human response" topic, which the waiting agent can then consume.
 
 This design makes H2M the primary integration point for building intelligent, context-aware AI applications on the Q Platform.
 

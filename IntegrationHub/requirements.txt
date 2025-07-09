@@ -8,6 +8,7 @@ pulsar-client
 # For connecting to external services
 httpx
 zulip_bots
+emails
 
 # Utilities
 opentelemetry-api

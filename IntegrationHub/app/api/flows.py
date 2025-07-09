@@ -1,69 +1,58 @@
 from fastapi import APIRouter, HTTPException, status
-from typing import List, Dict
+from typing import List, Dict, Any
+from pydantic import BaseModel
 
-from ..models.flow import Flow
-from ..core.pulsar_client import publish_flow_trigger
+from app.core.engine import engine
 
 router = APIRouter()
 
-# In-memory database for demonstration purposes
-flows_db: Dict[str, Flow] = {}
+# --- Pre-defined Flows ---
+# In a real system, these would be stored in a database.
+PREDEFINED_FLOWS: Dict[str, Dict[str, Any]] = {
+    "send-summary-email": {
+        "id": "send-summary-email",
+        "name": "Send Summary Email via SMTP",
+        "description": "A flow to send an email. Requires 'to', 'subject', and 'body' in the parameters.",
+        "steps": [
+            {
+                "name": "Send Email",
+                "connector_id": "smtp-email",
+                # This credential must be created in Vault beforehand
+                "credential_id": "smtp-credentials", 
+                # The 'configuration' here is filled by the trigger parameters
+            }
+        ]
+    }
+}
 
-@router.post("/", response_model=Flow, status_code=status.HTTP_201_CREATED)
-def create_flow(flow: Flow):
-    """
-    Create a new integration flow.
-    """
-    if flow.id in flows_db:
-        raise HTTPException(status_code=400, detail=f"Flow with ID {flow.id} already exists")
-    flows_db[flow.id] = flow
-    return flow
 
-@router.get("/", response_model=List[Flow])
-def list_flows():
-    """
-    List all integration flows.
-    """
-    return list(flows_db.values())
+class Flow(BaseModel):
+    id: str
+    name: str
+    description: str
 
-@router.get("/{flow_id}", response_model=Flow)
-def get_flow(flow_id: str):
-    """
-    Retrieve a single integration flow by its ID.
-    """
-    if flow_id not in flows_db:
-        raise HTTPException(status_code=404, detail=f"Flow with ID {flow_id} not found")
-    return flows_db[flow_id]
+class TriggerRequest(BaseModel):
+    parameters: Dict[str, Any]
 
-@router.put("/{flow_id}", response_model=Flow)
-def update_flow(flow_id: str, flow: Flow):
-    """
-    Update an existing integration flow.
-    """
-    if flow_id not in flows_db:
-        raise HTTPException(status_code=404, detail=f"Flow with ID {flow_id} not found")
-    flows_db[flow_id] = flow
-    return flow
 
-@router.delete("/{flow_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_flow(flow_id: str):
-    """
-    Delete an integration flow.
-    """
-    if flow_id not in flows_db:
-        raise HTTPException(status_code=404, detail=f"Flow with ID {flow_id} not found")
-    del flows_db[flow_id]
-    return
+@router.get("", response_model=List[Flow])
+async def list_flows():
+    """Lists all available pre-defined flows."""
+    return [Flow(**flow) for flow in PREDEFINED_FLOWS.values()]
 
-@router.post("/{flow_id}/trigger", status_code=status.HTTP_202_ACCEPTED)
-def trigger_flow(flow_id: str):
-    """
-    Manually triggers an integration flow to run by sending it to a Pulsar topic.
-    """
-    if flow_id not in flows_db:
-        raise HTTPException(status_code=404, detail=f"Flow with ID {flow_id} not found")
+@router.post("/{flow_id}/trigger")
+async def trigger_flow(flow_id: str, request: TriggerRequest):
+    """Triggers a pre-defined flow by its ID."""
+    if flow_id not in PREDEFINED_FLOWS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flow not found.")
     
-    flow = flows_db[flow_id]
-    publish_flow_trigger(flow) # Publish the flow execution request
-
-    return {"message": "Flow execution has been triggered successfully"} 
+    flow_config = PREDEFINED_FLOWS[flow_id]
+    
+    # Simple parameter mapping: The trigger parameters become the step configuration
+    # A more complex engine would have more sophisticated mapping logic.
+    flow_config["steps"][0]["configuration"] = request.parameters
+    
+    # We run the flow asynchronously in the background
+    await engine.run_flow(flow_config, data_context=request.parameters)
+    
+    return {"status": "Flow triggered successfully", "flow_id": flow_id} 

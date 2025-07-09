@@ -1,19 +1,12 @@
-# Core graph libraries
-# janusgraph-python (if a Python driver is to be used)
-# gremlinpython
+# KnowledgeGraphQ/requirements.txt
+fastapi
+uvicorn[standard]
+pydantic
+gremlinpython==3.7.0
 
-# For document loading and chunking
+# For document loading and chunking (in scripts)
 langchain
-
-# For generating vector embeddings
 sentence-transformers
 torch
-
-# For communicating with VectorStoreQ
 httpx
-
-# Observability
 structlog
-
-# Local Shared Libraries (install in editable mode from project root)
-# -e ./shared/q_vectorstore_client

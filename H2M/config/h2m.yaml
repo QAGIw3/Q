@@ -27,6 +27,8 @@ pulsar:
   service_url: "pulsar://localhost:6650"
   topics:
     reply_prefix: "persistent://public/default/h2m-replies-"
+    human_feedback_topic: "persistent://public/default/q.agentq.human_feedback"
+    human_response_topic: "persistent://public/default/q.agentq.human_responses"
 
 # OpenTelemetry Configuration
 otel:

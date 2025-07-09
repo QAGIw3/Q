@@ -14,7 +14,7 @@ This Terraform setup will deploy and configure the following services into the `
 -   **ArgoCD**: For continuous, GitOps-based application deployment.
 -   **Vault**: For centralized secret management.
 -   **Istio Policies**: The necessary `RequestAuthentication` and `AuthorizationPolicy` resources to secure the service mesh.
--   (Other core data services like Pulsar can also be managed here).
+-   (Other core data services like Pulsar and JanusGraph can also be managed here).
 
 ## Prerequisites
 

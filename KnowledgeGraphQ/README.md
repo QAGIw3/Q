@@ -2,21 +2,21 @@
 
 ## Overview
 
-The `KnowledgeGraphQ` service is responsible for batch processing and data ingestion pipelines that populate the Q Platform's core data services. Its primary role is to feed the `VectorStoreQ` with the high-quality embeddings needed for Retrieval-Augmented Generation (RAG).
+The `KnowledgeGraphQ` service is responsible for both populating and providing access to the Q Platform's structured knowledge graph, which is backed by a JanusGraph database.
 
-While the name implies a future capability of building a formal knowledge graph, its current, implemented functionality is focused on the **vector database ingestion pipeline**.
+It has two primary functions:
+1.  **Data Ingestion**: A standalone script (`scripts/build_graph.py`) populates the graph with entities and relationships from source documents.
+2.  **Query API**: A FastAPI service that exposes a `/query` endpoint, allowing other services (most notably `agentQ`) to execute Gremlin queries against the graph in real-time.
+
+This service is a cornerstone of the platform's ability to answer questions about how different pieces of information are related.
 
 ---
 
-## Data Ingestion Pipeline
+## Architecture
 
-The core of this service is the `scripts/ingest_docs.py` script. It performs the following steps:
-
-1.  **Create Collection**: It first communicates with the `VectorStoreQ` API to programmatically create the necessary collection (`rag_document_chunks`) and configure its schema and vector index.
-2.  **Load Documents**: It scans the `KnowledgeGraphQ/data/` directory for text-based documents (e.g., `.md`, `.txt`).
-3.  **Chunk Documents**: It uses the `langchain` library to split the documents into smaller, overlapping chunks suitable for embedding.
-4.  **Generate Embeddings**: It uses a `sentence-transformers` model to convert each text chunk into a vector embedding.
-5.  **Ingest Data**: Finally, it uses the `q_vectorstore_client` to batch-upload the chunks, their embeddings, and associated metadata to `VectorStoreQ`.
+-   **Graph Database**: Uses JanusGraph, a scalable graph database that can use various backends (like Cassandra) for storage.
+-   **Population Script**: `scripts/build_graph.py` is a utility that reads data files and creates vertices and edges in the graph.
+-   **Query Service**: A lightweight FastAPI application that provides a RESTful interface to the Gremlin query engine.
 
 ---
 
@@ -24,32 +24,31 @@ The core of this service is the `scripts/ingest_docs.py` script. It performs the
 
 ### 1. Prerequisites
 
--   A running instance of `VectorStoreQ`.
+-   A running JanusGraph instance.
 -   Python 3.9+ with dependencies installed.
 
-### 2. Installation
+### 2. Installation & Setup
 
-Install the necessary dependencies from the project root. It is recommended to use a virtual environment.
+1.  **Install Dependencies**:
+    ```bash
+    pip install -r KnowledgeGraphQ/requirements.txt
+    ```
 
-```bash
-# Install dependencies
-pip install -r KnowledgeGraphQ/requirements.txt
+2.  **Build the Graph**: Run the population script from the project root to build the initial graph from the data in `/data`.
+    ```bash
+    export PYTHONPATH=$(pwd)
+    python KnowledgeGraphQ/scripts/build_graph.py
+    ```
 
-# Install the shared client library
-pip install -e ./shared/q_vectorstore_client
-```
+3.  **Run the Service**: Start the API server to make the graph queryable.
+    ```bash
+    # From the project root
+    export PYTHONPATH=$(pwd)
+    uvicorn KnowledgeGraphQ.app.main:app --host 0.0.0.0 --port 8083 --reload
+    ```
 
-### 3. Add Data
+### 3. API Usage
 
-Place the markdown or text files you want to ingest into the `KnowledgeGraphQ/data/` directory. Two example files are already present.
+The service exposes a single primary endpoint:
 
-### 4. Run the Ingestion Script
-
-Execute the script from the **root directory of the Q project** to ensure correct path resolution.
-
-```bash
-export PYTHONPATH=$(pwd)
-python KnowledgeGraphQ/scripts/ingest_docs.py
-```
-
-The script will log its progress in a structured JSON format.
+-   `POST /query`: Accepts a JSON object with a single key, `query`, containing a raw Gremlin query string. It executes the query and returns the result.

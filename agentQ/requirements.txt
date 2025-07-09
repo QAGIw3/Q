@@ -11,6 +11,9 @@ httpx
 structlog
 hvac
 
+# Graph
+gremlinpython==3.7.0
+
 # OpenTelemetry
 opentelemetry-api==1.24.0
 opentelemetry-sdk==1.24.0

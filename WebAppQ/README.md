@@ -2,9 +2,9 @@
 
 ## Overview
 
-WebAppQ is the official web-based user interface for the Q Platform. It provides a simple, clean chat interface for users to interact with the `H2M` (Human-to-Machine) service.
+WebAppQ is the official web-based user interface for the Q Platform. It provides a simple, clean chat interface for users to interact with the platform's autonomous agents via the `H2M` service.
 
-This application handles the full OIDC authentication flow with Keycloak and establishes a secure, real-time WebSocket connection to the backend.
+This application handles the full OIDC authentication flow with Keycloak and establishes a secure, real-time WebSocket connection to the backend. It can now handle both standard AI responses and direct clarification questions from an agent, providing a true human-in-the-loop experience.
 
 ## Tech Stack
 

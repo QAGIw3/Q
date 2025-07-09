@@ -1,57 +1,57 @@
-import importlib
+import logging
+import asyncio
 from typing import Dict, Any
 
-from ..models.flow import Flow, FlowStep
-from ..core import vault_client
+from app.connectors.zulip.zulip_connector import ZulipConnector
+from app.connectors.smtp.email_connector import EmailConnector
+from app.core.vault_client import vault_client
 
-def get_connector_instance(step: FlowStep):
-    """
-    Dynamically imports and instantiates a connector, first enriching
-    its configuration with secrets from the vault.
-    """
-    config = step.configuration.copy()
-    
-    # If a credential is provided, fetch it and merge it into the config
-    if step.credential_id:
-        secrets = vault_client.retrieve_secret(step.credential_id)
-        if not secrets:
-            raise ValueError(f"Secrets for credential_id '{step.credential_id}' not found in vault.")
-        config.update(secrets)
+# In a real system, this would be more dynamic (e.g., using entrypoints)
+AVAILABLE_CONNECTORS = {
+    "zulip-message": ZulipConnector,
+    "smtp-email": EmailConnector,
+}
 
-    # This is a simplified mapping for the PoC
-    connector_map = {
-        "zulip-message": "IntegrationHub.app.connectors.zulip.zulip_connector"
-    }
+class FlowExecutionEngine:
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
 
-    connector_id = step.connector_id
-    if connector_id not in connector_map:
-        raise ValueError(f"Connector '{connector_id}' not found.")
+    async def _execute_step(self, step_config: Dict[str, Any]):
+        connector_id = step_config.get("connector_id")
+        credential_id = step_config.get("credential_id")
+        step_params = step_config.get("configuration", {})
 
-    module_path = connector_map[connector_id]
-    try:
-        connector_module = importlib.import_module(module_path)
-        connector_factory = getattr(connector_module, "get_connector")
-        return connector_factory(config)
-    except (ImportError, AttributeError) as e:
-        raise RuntimeError(f"Could not load connector '{connector_id}': {e}")
+        if connector_id not in AVAILABLE_CONNECTORS:
+            raise ValueError(f"Connector '{connector_id}' not found.")
 
+        # Get credentials from Vault
+        credentials = await vault_client.get_credential(credential_id)
+        
+        # Initialize the connector with credentials
+        ConnectorClass = AVAILABLE_CONNECTORS[connector_id]
+        # The credential 'secrets' dict should match the connector's expected config
+        connector = ConnectorClass(credentials.secrets)
+        
+        # Here we assume a 'send' method. A more robust implementation
+        # would have a BaseConnector with abstract methods.
+        connector.send(**step_params)
+        
+        self.logger.info(f"Successfully executed step: {step_config.get('name')}")
 
-def run_flow(flow: Flow, data_context: Dict[str, Any]):
-    """
-    A very basic flow runner for the PoC.
-    It iterates through the steps and executes the configured connector.
-    """
-    print(f"--- Running Flow: {flow.name} ---")
-    print(f"    Initial data context: {data_context}")
-    for step in flow.steps:
-        print(f"  - Executing step: {step.name}")
-        try:
-            connector = get_connector_instance(step)
-            # Pass the current data context to the connector
-            connector.write(data=data_context)
-            print(f"    Step '{step.name}' completed successfully.")
-        except (ValueError, RuntimeError, Exception) as e:
-            print(f"    ERROR: Step '{step.name}' failed: {e}")
-            # In a real engine, we'd have error handling, retries, etc.
-            break # Stop flow on first failure for this PoC
-    print(f"--- Flow Finished: {flow.name} ---") 
+    async def run_flow(self, flow: Dict[str, Any], data_context: Dict[str, Any]):
+        self.logger.info(f"--- Running Flow: {flow.get('name')} ---")
+        self.logger.info(f"    Initial data context: {data_context}")
+        for step in flow.get("steps", []):
+            self.logger.info(f"  - Executing step: {step.get('name')}")
+            try:
+                await self._execute_step(step)
+            except (ValueError, RuntimeError, Exception) as e:
+                self.logger.error(f"    ERROR: Step '{step.get('name')}' failed: {e}")
+                # In a real engine, we'd have error handling, retries, etc.
+                break # Stop flow on first failure for this PoC
+        self.logger.info(f"--- Flow Finished: {flow.get('name')} ---") 

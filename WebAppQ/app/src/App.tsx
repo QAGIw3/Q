@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
-import { Box, TextField, Button, Paper, Typography, AppBar, Toolbar, CircularProgress, Container } from '@mui/material';
+import { Box, TextField, Button, Paper, Typography, AppBar, Toolbar, CircularProgress, Container, Alert } from '@mui/material';
 import { AuthContext } from './AuthContext';
 import { jwtDecode } from 'jwt-decode';
 
 interface Message {
-  sender: 'user' | 'ai';
+  sender: 'user' | 'ai' | 'agent_question';
   text: string;
 }
 
@@ -13,6 +13,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [isReplyingToAgent, setIsReplyingToAgent] = useState(false);
   const ws = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -29,7 +30,15 @@ function App() {
 
       ws.current.onmessage = (event) => {
         const receivedMessage = JSON.parse(event.data);
-        setMessages((prev) => [...prev, { sender: 'ai', text: receivedMessage.text }]);
+        
+        if (receivedMessage.type === 'clarification_request') {
+          setMessages((prev) => [...prev, { sender: 'agent_question', text: receivedMessage.question }]);
+          setIsReplyingToAgent(true);
+        } else {
+          setMessages((prev) => [...prev, { sender: 'ai', text: receivedMessage.text }]);
+          setIsReplyingToAgent(false); // A normal AI response means we are no longer in a reply state
+        }
+
         if (receivedMessage.conversation_id) {
           setConversationId(receivedMessage.conversation_id);
         }
@@ -46,10 +55,15 @@ function App() {
       const message = {
         text: input,
         conversation_id: conversationId,
+        is_human_response: isReplyingToAgent,
       };
       ws.current.send(JSON.stringify(message));
       setMessages((prev) => [...prev, { sender: 'user', text: input }]);
       setInput('');
+      // After sending a reply, we go back to normal conversation mode
+      if (isReplyingToAgent) {
+        setIsReplyingToAgent(false);
+      }
     }
   };
 
@@ -76,13 +90,22 @@ function App() {
         <Paper elevation={3} sx={{ height: 'calc(100vh - 200px)', overflowY: 'auto', p: 2, display: 'flex', flexDirection: 'column-reverse' }}>
           {/* Messages will be reversed in CSS, so map normally */}
           <Box>
-            {messages.map((msg, index) => (
-              <Box key={index} my={1} display="flex" justifyContent={msg.sender === 'user' ? 'flex-end' : 'flex-start'}>
-                <Paper elevation={1} sx={{ p: 1.5, bgcolor: msg.sender === 'user' ? 'primary.main' : 'grey.300', color: msg.sender === 'user' ? 'primary.contrastText' : 'inherit', maxWidth: '70%' }}>
-                  <Typography variant="body1">{msg.text}</Typography>
-                </Paper>
-              </Box>
-            ))}
+            {messages.map((msg, index) => {
+              if (msg.sender === 'agent_question') {
+                return (
+                  <Alert key={index} severity="info" sx={{ my: 1 }}>
+                    <Typography variant="body1"><strong>The agent is asking:</strong> {msg.text}</Typography>
+                  </Alert>
+                );
+              }
+              return (
+                <Box key={index} my={1} display="flex" justifyContent={msg.sender === 'user' ? 'flex-end' : 'flex-start'}>
+                  <Paper elevation={1} sx={{ p: 1.5, bgcolor: msg.sender === 'user' ? 'primary.main' : 'grey.300', color: msg.sender === 'user' ? 'primary.contrastText' : 'inherit', maxWidth: '70%' }}>
+                    <Typography variant="body1">{msg.text}</Typography>
+                  </Paper>
+                </Box>
+              );
+            })}
           </Box>
         </Paper>
         <Box component="form" sx={{ mt: 2, display: 'flex' }} onSubmit={(e) => { e.preventDefault(); handleSend(); }}>
