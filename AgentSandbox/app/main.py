@@ -3,12 +3,9 @@ import os
 import logging
 import time
 import yaml
-import pulsar
 import httpx
 import threading
 import uuid
-import io
-import fastavro
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
@@ -23,102 +20,93 @@ logger = structlog.get_logger("agentsandbox")
 app = FastAPI(title="Agent Sandbox", version="0.1.0")
 setup_metrics(app, app_name="AgentSandbox")
 
-# In-memory storage for simulation results (for MVP)
+# In-memory storage for simulation results
 simulations: Dict[str, Dict[str, Any]] = {}
 
-# --- Pulsar Listener ---
-# This will run in a separate thread for each simulation
-def result_listener_thread(sim_id: str, stop_event: threading.Event):
-    # Create a logger for this specific thread/simulation
+# --- Assertion Engine ---
+def run_assertions(sim_id: str, workflow_obj: Dict[str, Any], assertions: List[Dict[str, Any]]):
+    """Runs a list of assertions against a completed workflow object."""
     thread_logger = logger.bind(simulation_id=sim_id)
-    thread_logger.info("Starting result listener thread.")
-    simulations[sim_id]["results"] = {}
+    thread_logger.info("Running assertions...")
     
-    RESULTS_TOPIC = "q.agentq.results"
-    SUBSCRIPTION_NAME = f"sandbox-sub-{sim_id}"
-    RESULT_SCHEMA = fastavro.parse_schema({
-        "namespace": "q.agentq", "type": "record", "name": "ResultMessage",
-        "fields": [{"name": "id", "type": "string"}, {"name": "result", "type": "string"}]
-    })
-
-    client = None
-    try:
-        client = pulsar.Client("pulsar://localhost:6650")
-        consumer = client.subscribe(RESULTS_TOPIC, SUBSCRIPTION_NAME)
+    results = []
+    all_tasks = workflow_obj.get("tasks", []) # Assuming tasks are a flat list for now
+    
+    for assertion in assertions:
+        assertion_result = {"description": assertion["description"], "status": "FAIL"}
         
-        while not stop_event.is_set():
-            try:
-                msg = consumer.receive(timeout_millis=1000)
-                bytes_reader = io.BytesIO(msg.data())
-                record = next(fastavro.reader(bytes_reader, RESULT_SCHEMA), None)
-                if record:
-                    prompt_id = record['id']
-                    if prompt_id in simulations[sim_id]["steps"]:
-                        end_time = time.time()
-                        start_time = simulations[sim_id]["steps"][prompt_id]["start_time"]
-                        latency = end_time - start_time
-                        
-                        result = record['result']
-                        simulations[sim_id]["steps"][prompt_id]["status"] = "COMPLETED"
-                        simulations[sim_id]["steps"][prompt_id]["end_time"] = end_time
-                        simulations[sim_id]["steps"][prompt_id]["latency_sec"] = latency
-                        simulations[sim_id]["steps"][prompt_id]["result"] = result
-                        
-                        # Validation
-                        expected = simulations[sim_id]["steps"][prompt_id].get("expected_keyword")
-                        if expected:
-                            if expected in result:
-                                simulations[sim_id]["steps"][prompt_id]["validation"] = "PASSED"
-                            else:
-                                simulations[sim_id]["steps"][prompt_id]["validation"] = "FAILED"
+        try:
+            if assertion["type"] == "workflow_status":
+                if workflow_obj["status"] == assertion["expected"]:
+                    assertion_result["status"] = "PASS"
+            
+            elif assertion["type"] == "task_status":
+                task = next((t for t in all_tasks if t["task_id"] == assertion["task_id"]), None)
+                if task and task["status"] == assertion["expected"]:
+                    assertion_result["status"] = "PASS"
+                else:
+                    assertion_result["details"] = f"Task '{assertion['task_id']}' not found or status was '{task.get('status') if task else 'N/A'}'"
+            
+            # Placeholder for future external checks
+            # elif assertion["type"] == "external_check":
+            #     pass
 
-                        thread_logger.info("Received result", prompt_id=prompt_id)
-                consumer.acknowledge(msg)
-            except pulsar.Timeout:
-                continue
-    except Exception as e:
-        thread_logger.error("Error in result listener", error=str(e))
-    finally:
-        if client:
-            client.close()
-        thread_logger.info("Result listener thread stopped.")
+        except Exception as e:
+            assertion_result["details"] = f"Error during assertion: {e}"
+        
+        results.append(assertion_result)
 
+    simulations[sim_id]["assertion_results"] = results
+    if all(r["status"] == "PASS" for r in results):
+        simulations[sim_id]["status"] = "COMPLETED_SUCCESS"
+    else:
+        simulations[sim_id]["status"] = "COMPLETED_FAILURE"
+    thread_logger.info("Assertions finished.", results=results)
 
 # --- Simulation Runner ---
 def run_scenario(sim_id: str, scenario: Dict[str, Any]):
     thread_logger = logger.bind(simulation_id=sim_id)
     thread_logger.info("Starting scenario", scenario_name=scenario['name'])
     simulations[sim_id]["status"] = "RUNNING"
-    h2m_endpoint = scenario["h2m_endpoint"]
+    
+    manager_endpoint = scenario["manager_endpoint"]
+    trigger_data = scenario["trigger"]
+    assertions = scenario["assertions"]
+    workflow_id = None
     
     try:
+        # 1. Trigger the workflow
         with httpx.Client() as http_client:
-            for step in scenario["steps"]:
-                intent = step["intent"]
-                prompt_id = f"provider:{intent}" # Mimic H2M's cache key as ID
-                
-                simulations[sim_id]["steps"][prompt_id] = {
-                    "name": step["name"],
-                    "intent": intent,
-                    "status": "SENT",
-                    "start_time": time.time(),
-                    "expected_keyword": step.get("expected_keyword")
-                }
-                
-                thread_logger.info("Sending intent", intent=intent)
-                http_client.post(h2m_endpoint, json={"intent": intent})
-                time.sleep(1) # Small delay between requests
-        
-        # Wait for results or timeout
-        time.sleep(30) # Give 30 seconds for all results to arrive
+            thread_logger.info("Triggering workflow...", prompt=trigger_data['prompt'])
+            response = http_client.post(f"{manager_endpoint}/workflows/", json=trigger_data, timeout=30.0)
+            response.raise_for_status()
+            workflow_id = response.json()["workflow_id"]
+            simulations[sim_id]["workflow_id"] = workflow_id
+            thread_logger.info("Workflow triggered successfully", workflow_id=workflow_id)
+
+        # 2. Poll for workflow completion
+        polling_start_time = time.time()
+        timeout_seconds = 300 # 5 minutes
+        while True:
+            if time.time() - polling_start_time > timeout_seconds:
+                raise TimeoutError("Workflow did not complete within the timeout period.")
+
+            with httpx.Client() as http_client:
+                response = http_client.get(f"{manager_endpoint}/workflows/{workflow_id}")
+            
+            if response.status_code == 200:
+                workflow_data = response.json()
+                if workflow_data["status"] in ["COMPLETED", "FAILED"]:
+                    thread_logger.info("Workflow reached terminal state.", status=workflow_data["status"])
+                    run_assertions(sim_id, workflow_data, assertions)
+                    break # Exit polling loop
+            
+            time.sleep(10) # Poll every 10 seconds
         
     except Exception as e:
-        thread_logger.error("Error running scenario", error=str(e))
-        simulations[sim_id]["status"] = "FAILED"
+        thread_logger.error("Error running scenario", error=str(e), exc_info=True)
+        simulations[sim_id]["status"] = "ERROR"
     finally:
-        simulations[sim_id]["stop_event"].set()
-        if simulations[sim_id]["status"] != "FAILED":
-            simulations[sim_id]["status"] = "COMPLETED"
         thread_logger.info("Scenario finished.")
 
 
@@ -138,22 +126,15 @@ async def run_simulation(scenario_name: str):
         scenario = yaml.safe_load(f)
         
     sim_id = str(uuid.uuid4())
-    stop_event = threading.Event()
     
     simulations[sim_id] = {
         "id": sim_id,
         "scenario_name": scenario_name,
         "status": "INITIALIZING",
         "start_time": time.time(),
-        "steps": {},
-        "stop_event": stop_event
     }
     
-    # Start listener and runner in background threads
-    listener = threading.Thread(target=result_listener_thread, args=(sim_id, stop_event), name=f"listener-{sim_id[:8]}")
     runner = threading.Thread(target=run_scenario, args=(sim_id, scenario), name=f"runner-{sim_id[:8]}")
-    
-    listener.start()
     runner.start()
     
     return SimulationResponse(simulation_id=sim_id, status="STARTED")
@@ -163,11 +144,8 @@ async def get_simulation_status(sim_id: str):
     if sim_id not in simulations:
         raise HTTPException(status_code=404, detail="Simulation not found")
     
-    sim_data = simulations[sim_id].copy()
-    sim_data.pop("stop_event", None) # Don't return the event object
-
     return SimulationResponse(
         simulation_id=sim_id,
-        status=sim_data["status"],
-        details=sim_data
+        status=simulations[sim_id]["status"],
+        details=simulations[sim_id]
     )

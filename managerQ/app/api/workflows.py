@@ -1,9 +1,11 @@
-from fastapi import APIRouter, HTTPException, status, Body, Depends
-from typing import List, Dict, Any
+from fastapi import APIRouter, HTTPException, status, Body, Depends, Query
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
 from managerQ.app.core.workflow_manager import workflow_manager
-from managerQ.app.models import Workflow, TaskStatus, ApprovalBlock
+from managerQ.app.models import Workflow, TaskStatus, ApprovalBlock, WorkflowStatus
+from managerQ.app.core.goal_manager import goal_manager
+from managerQ.app.core.goal import Goal
 from shared.q_auth_parser.parser import get_current_user
 from shared.q_auth_parser.models import UserClaims
 from shared.observability.audit import audit_log
@@ -12,6 +14,68 @@ router = APIRouter()
 
 class ApprovalRequest(BaseModel):
     approved: bool
+
+class CreateWorkflowRequest(BaseModel):
+    prompt: str
+    context: Optional[Dict[str, Any]] = None
+
+@router.get("/", response_model=List[Workflow])
+async def list_workflows(
+    status: Optional[WorkflowStatus] = Query(None, description="Filter workflows by status."),
+    skip: int = Query(0, ge=0, description="Number of workflows to skip."),
+    limit: int = Query(100, ge=1, le=200, description="Maximum number of workflows to return.")
+):
+    """
+    Retrieves a list of all workflows, with optional filtering and pagination.
+    """
+    all_workflows = workflow_manager.get_all_workflows()
+
+    if status:
+        filtered_workflows = [wf for wf in all_workflows if wf.status == status]
+    else:
+        filtered_workflows = all_workflows
+    
+    return filtered_workflows[skip : skip + limit]
+
+
+@router.post("/", response_model=Workflow, status_code=status.HTTP_201_CREATED)
+async def create_workflow(
+    request: CreateWorkflowRequest,
+    user: UserClaims = Depends(get_current_user)
+):
+    """
+    Creates and starts a new workflow from a simple prompt.
+    """
+    try:
+        # Create a high-level goal from the prompt
+        new_goal = Goal(
+            prompt=request.prompt,
+            created_by=user.preferred_username,
+            context=request.context or {}
+        )
+        goal_manager.create_goal(new_goal)
+
+        audit_log("goal_created", user=user.preferred_username, details={"goal_id": new_goal.goal_id, "prompt": request.prompt})
+
+        # Generate and run the workflow for this goal
+        # In a real system, this might be asynchronous, but for an API we'll do it directly.
+        workflow = await new_goal.create_and_run_workflow()
+        
+        if not workflow:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create a workflow from the provided prompt. The planning agent might have failed."
+            )
+
+        audit_log("workflow_created", user=user.preferred_username, details={"workflow_id": workflow.workflow_id, "from_goal": new_goal.goal_id})
+        return workflow
+    except Exception as e:
+        # logger.error(f"Error creating workflow: {e}", exc_info=True) # Assuming logger is defined elsewhere
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {e}"
+        )
+
 
 @router.get("/by_event/{event_id}", response_model=Workflow)
 async def get_workflow_by_event_id(event_id: str):

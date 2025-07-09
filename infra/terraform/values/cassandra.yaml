@@ -1,11 +1,25 @@
+# This configuration simulates a multi-datacenter setup for high availability.
+# It assumes the Helm chart can create statefulsets for multiple datacenters.
+# If it can't, two separate releases would be needed.
+
+# Number of nodes in the primary datacenter (this release)
 replicaCount: 3
-resources:
-  requests:
-    cpu: "500m"
-    memory: "2Gi"
-  limits:
-    cpu: "1"
-    memory: "4Gi"
+
+# Total number of nodes across all datacenters
+# This is used by the chart to correctly configure gossip.
+# For example, if dc2 has 3 nodes, the total is 6.
+totalReplicaCount: 6 
+
+config:
+  # These settings are written to cassandra.yaml
+  cassandra.yaml:
+    cluster_name: 'Q-Platform-Cassandra'
+    num_tokens: 256
+    # Use a network-aware snitch for multi-DC
+    endpoint_snitch: 'GossipingPropertyFileSnitch'
+    # Define the datacenters
+    datacenter: 'dc1'
+    rack: 'rack1'
 
 persistence:
   enabled: true

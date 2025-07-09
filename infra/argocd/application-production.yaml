@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: q-platform-production
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/your-repo/q-platform.git'
+    path: infra/kubernetes/overlays/production
+    targetRevision: main # Or a specific tag/commit hash for production
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: q-platform-production
+  syncPolicy:
+    # Production should not self-heal or auto-sync without approval in a real scenario
+    # For this project, we'll keep it for simplicity.
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true 

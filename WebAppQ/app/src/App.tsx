@@ -3,6 +3,9 @@ import { BrowserRouter as Router, Route, Routes, Link, Navigate } from 'react-ro
 import { Box, Typography, AppBar, Toolbar, Button, CircularProgress, Container } from '@mui/material';
 import { AuthContext, AuthProvider } from './AuthContext';
 import Chat from './components/Chat/Chat';
+import { WorkflowsPage } from './pages/WorkflowsPage';
+import { WorkflowDetailPage } from './pages/WorkflowDetailPage';
+import { SearchPage } from './pages/SearchPage';
 
 function Home() {
   return (
@@ -38,6 +41,8 @@ function App() {
               <Link to="/" style={{ textDecoration: 'none', color: 'inherit' }}>Q Platform</Link>
             </Typography>
             <Button color="inherit" component={Link} to="/chat">Chat</Button>
+            <Button color="inherit" component={Link} to="/workflows">Workflows</Button>
+            <Button color="inherit" component={Link} to="/search">Search</Button>
             <Button color="inherit" onClick={authContext.logout}>Logout</Button>
           </Toolbar>
         </AppBar>
@@ -48,13 +53,28 @@ function App() {
               <Chat />
             </RequireAuth>
           } />
+          <Route path="/workflows" element={
+            <RequireAuth>
+              <WorkflowsPage />
+            </RequireAuth>
+          } />
+          <Route path="/workflows/:workflowId" element={
+            <RequireAuth>
+              <WorkflowDetailPage />
+            </RequireAuth>
+          } />
+          <Route path="/search" element={
+            <RequireAuth>
+              <SearchPage />
+            </RequireAuth>
+          } />
         </Routes>
       </Box>
     </Router>
   );
 }
 
-function RequireAuth({ children }: { children: JSX.Element }) {
+function RequireAuth({ children }: { children: React.ReactElement }) {
   const authContext = useContext(AuthContext);
   if (!authContext || !authContext.isAuthenticated) {
     return <Navigate to="/" replace />;

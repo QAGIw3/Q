@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: q-platform-production
+resources:
+  - ../../base
+# Patches for the production environment will go here.
+# For example, to increase replicas and set resource limits.
+# patchesStrategicMerge:
+#   - |-
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     metadata:
+#       name: manager-q
+#     spec:
+#       replicas: 3
+#       template:
+#         spec:
+#           containers:
+#           - name: manager-q
+#             resources:
+#               requests:
+#                 cpu: "500m"
+#                 memory: "1Gi"
+#               limits:
+#                 cpu: "1"
+#                 memory: "2Gi" 

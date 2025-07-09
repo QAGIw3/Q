@@ -1,11 +1,11 @@
 pulsar-client
-pyyaml
-structlog
-fastavro
-pyignite
+pydantic-settings
 jinja2
-sentence-transformers
-# Add shared libraries
+python-json-logger
+opentelemetry-api
+opentelemetry-sdk
+
+# Shared libraries
 -e ./shared/q_auth_parser
 -e ./shared/q_knowledgegraph_client
 -e ./shared/q_memory_schemas

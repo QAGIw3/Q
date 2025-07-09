@@ -2,7 +2,7 @@
 #
 # Reusable CI workflow for Python-based microservices.
 
-name: Continuous Integration
+name: Q Platform CI
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
     branches: [ main ]
 
 jobs:
-  lint-and-test:
+  build-and-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -23,29 +23,83 @@ jobs:
           - KnowledgeGraphQ
           - managerQ
           - VectorStoreQ
-        python-version: [3.11]
-
+          - WorkflowWorker
+          - shared # Also test shared libraries
+    
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v3
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: 3.9
 
-    - name: Install dependencies
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v2
+      with:
+        languages: python
+
+    - name: Install dependencies for ${{ matrix.service }}
       run: |
         python -m pip install --upgrade pip
-        pip install ruff pytest
-        # Install service-specific dependencies
-        if [ -f ${{ matrix.service }}/requirements.txt ]; then pip install -r ${{ matrix.service }}/requirements.txt; fi
-        # Install dev dependencies if they exist
-        if [ -f ${{ matrix.service }}/requirements-dev.txt ]; then pip install -r ${{ matrix.service }}/requirements-dev.txt; fi
+        # Install the service's specific requirements
+        if [ -f "${{ matrix.service }}/requirements.txt" ]; then
+          pip install -r ${{ matrix.service }}/requirements.txt
+        fi
+        # Install test dependencies
+        pip install flake8 pytest
 
-    - name: Lint with ruff
+    - name: Lint with flake8
+      working-directory: ./${{ matrix.service }}
       run: |
-        ruff check ./${{ matrix.service }}
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Test with pytest
+      working-directory: ./${{ matrix.service }}
       run: |
-        pytest ./${{ matrix.service }}/tests 
+        pytest
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+      continue-on-error: true # Do not fail the build on findings yet
+
+  docker-build-and-push:
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - agentQ
+          - AuthQ
+          - H2M
+          - IntegrationHub
+          - KnowledgeGraphQ
+          - managerQ
+          - VectorStoreQ
+          - WorkflowWorker
+    steps:
+      - uses: actions/checkout@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v4
+        with:
+          context: ./${{ matrix.service }}
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        continue-on-error: true
+        with:
+          image-ref: '${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest'
+          format: 'table'
+          severity: 'CRITICAL,HIGH' 

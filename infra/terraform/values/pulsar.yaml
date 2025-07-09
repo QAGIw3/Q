@@ -1,5 +1,24 @@
+# This configuration simulates a multi-datacenter setup for high availability.
+# In a real multi-region deployment, you would have two separate Pulsar Helm releases,
+# one for each region, and configure them to connect to each other.
+# This file demonstrates the settings required for one of those clusters (e.g., the primary).
+
+# --- Cluster Metadata ---
+# This identifies the primary cluster and the secondary cluster for replication.
+cluster:
+  name: "pulsar-dc1"
+  # This tells dc1 about dc2
+  replication_clusters:
+    - name: "pulsar-dc2"
+      service_url: "pulsar://pulsar-dc2-proxy.q-platform-production.svc.cluster.local:6650"
+
+# --- Component Configuration ---
 broker:
   replicaCount: 2
+  config:
+    # Enable replication and set cluster names
+    replicationTlsEnabled: false # Assuming inter-cluster traffic is on a private network
+    clusterName: "pulsar-dc1"
   resources:
     requests:
       cpu: "500m"
@@ -15,4 +34,4 @@ bookkeeper:
   replicaCount: 3
 
 proxy:
-  replicaCount: 1 
+  replicaCount: 2 

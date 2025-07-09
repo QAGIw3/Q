@@ -16,6 +16,9 @@ import json
 from opentelemetry import trace
 import structlog
 import httpx
+from fastapi import FastAPI
+import uvicorn
+import threading
 
 from shared.opentelemetry.tracing import setup_tracing
 from shared.observability.logging_config import setup_logging
@@ -78,18 +81,21 @@ running = True
 
 # --- System Prompt ---
 SYSTEM_PROMPT = """
-You are an autonomous AI agent. Your goal is to answer the user's question or fulfill their request.
+You are an autonomous AI agent. Your goal is to answer the user's question or fulfill their request by breaking it down into a sequence of steps.
 
 You operate in a ReAct (Reason, Act) loop. In each turn, you must use the following format:
 
 Thought: [Your step-by-step reasoning about the current state, what you have learned, and what you need to do next. Be very detailed.]
 Action: [A single JSON object describing the action to take. Must be one of `finish` or `call_tool`]
 
-The `action` value MUST be a JSON object.
+The `action` value MUST be a single, valid JSON object, and nothing else.
 
-Example `Action` objects:
-- To provide a final answer: `{"action": "finish", "answer": "The final answer to the user."}`
-- To call a tool: `{"action": "call_tool", "tool_name": "name_of_tool", "parameters": {"arg1": "value1", "arg2": "value2"}}`
+**TOOL SELECTION AND USAGE:**
+Your primary job is to select the single best tool to make progress towards the goal. Use the following process:
+1.  **Analyze the Goal:** What is the user's overall objective?
+2.  **Identify the Next Step:** What is the most immediate, concrete piece of information or action required?
+3.  **Select the Best Tool:** From the list of available tools, which one is the most direct way to accomplish the next step? Do not use a tool if a more direct one is available.
+4.  **Verify Parameters:** Do you have all the information needed for the tool's parameters? If not, your thought process should focus on how to acquire the missing information.
 
 **IMPORTANT STRATEGIES:**
 1.  **Delegate When Necessary:** If the user's request requires specialized knowledge (e.g., analyzing system logs, running a complex data query), you **MUST** delegate it to the appropriate specialist agent using the `delegate_task` tool.
@@ -101,6 +107,10 @@ Example `Action` objects:
 
 Here are the tools you have available:
 {tools}
+
+Example `Action` objects:
+- To provide a final answer: `{"action": "finish", "answer": "The final answer to the user."}`
+- To call a tool: `{"action": "call_tool", "tool_name": "name_of_tool", "parameters": {"arg1": "value1", "arg2": "value2"}}`
 
 Begin!
 """
@@ -143,10 +153,14 @@ THOUGHT_SCHEMA = fastavro.parse_schema({
     ]
 })
 
-def load_config():
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'agent.yaml')
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
+def load_config_from_vault(vault_client: VaultClient):
+    """Loads configuration for the agent service from Vault."""
+    try:
+        config = vault_client.read_secret_data("secret/data/agentq/config")
+        return config
+    except Exception as e:
+        logger.critical(f"Failed to load agentq configuration from Vault: {e}", exc_info=True)
+        raise
 
 def setup_agent_memory():
     """
@@ -175,7 +189,7 @@ def setup_agent_memory():
                     {"name": "summary_text", "dtype": "VarChar", "max_length": 1000},
                     {"name": "vector", "dtype": "FloatVector", "dim": 768}
                 ],
-                "enable_dynamic_field": False
+                "enable_dynamic_field": True # Allow storing the full memory object
             },
             "index": {
                 "field_name": "vector",
@@ -400,6 +414,16 @@ async def reflector_loop(prompt_data, qpulse_client):
         return f"Error: Failed to generate lesson. Reason: {e}"
 
 
+# --- FastAPI App for Health Checks ---
+app = FastAPI()
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+def run_health_server():
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
 # --- Agent Setup ---
 
 def setup_default_agent(config: dict, vault_client: VaultClient):
@@ -503,84 +527,50 @@ def setup_reflector_agent(config: dict, vault_client: VaultClient):
     return toolbox, context_manager
 
 def run_agent():
-    config = load_config()
-    pulsar_config = config['pulsar']
-    llm_config = config['llm']
-    
-    setup_agent_memory()
+    global running
+    logger.info("Starting agentQ...")
+
+    # --- Config Loading ---
+    try:
+        vault_client = VaultClient(role="agentq-role")
+        config = load_config_from_vault(vault_client)
+        logger.info("Configuration loaded successfully from Vault.")
+    except Exception as e:
+        logger.critical(f"Could not start agentQ due to Vault connection error: {e}", exc_info=True)
+        return
+
+    # --- Pulsar Setup ---
+    pulsar_config = config.get('pulsar', {})
+    pulsar_client = pulsar.Client(pulsar_config.get('service_url'))
+
+    result_producer = pulsar_client.create_producer(pulsar_config.get('topics', {}).get('results'))
+    registration_producer = pulsar_client.create_producer(pulsar_config.get('topics', {}).get('registration'))
+    thoughts_producer = pulsar_client.create_producer(pulsar_config.get('topics', {}).get('thoughts'))
 
     # --- Personality Selection ---
     personality = os.environ.get("AGENT_PERSONALITY", "default")
-    
-    # --- Vault Client Setup ---
-    # Each agent personality will have its own Vault role
-    vault_role = f"{personality}-role"
-    try:
-        vault_client = VaultClient(role=vault_role)
-    except Exception as e:
-        logger.critical(f"Failed to initialize Vault client with role '{vault_role}'. Agent cannot start.", error=str(e), exc_info=True)
-        return
+    logger.info(f"Starting agent with personality: {personality}")
 
     if personality == "devops":
-        agent_id = DEVOPS_AGENT_ID
-        task_topic = DEVOPS_TASK_TOPIC
-        system_prompt = DEVOPS_SYSTEM_PROMPT
-        toolbox, context_manager = setup_devops_agent(config, vault_client)
+        agent_id, task_topic, toolbox, llm_config, context_manager, qpulse_client = setup_devops_agent(config, vault_client)
     elif personality == "data_analyst":
-        agent_id = DA_AGENT_ID
-        task_topic = DA_TASK_TOPIC
-        system_prompt = DATA_ANALYST_SYSTEM_PROMPT
-        toolbox, context_manager = setup_data_analyst_agent(config, vault_client)
+        agent_id, task_topic, toolbox, llm_config, context_manager, qpulse_client = setup_data_analyst_agent(config, vault_client)
     elif personality == "knowledge_engineer":
-        agent_id = KE_AGENT_ID
-        task_topic = KE_TASK_TOPIC
-        system_prompt = KNOWLEDGE_ENGINEER_SYSTEM_PROMPT
-        toolbox, context_manager = setup_knowledge_engineer_agent(config, vault_client)
+        agent_id, task_topic, toolbox, llm_config, context_manager, qpulse_client = setup_knowledge_engineer_agent(config, vault_client)
     elif personality == "predictive_analyst":
-        agent_id = PA_AGENT_ID
-        task_topic = PA_TASK_TOPIC
-        system_prompt = PREDICTIVE_ANALYST_SYSTEM_PROMPT
-        toolbox, context_manager = setup_predictive_analyst_agent(config, vault_client)
-    elif personality == "docs_agent":
-        agent_id = DOCS_AGENT_ID
-        task_topic = DOCS_TASK_TOPIC
-        system_prompt = DOCS_AGENT_SYSTEM_PROMPT
-        toolbox, context_manager = setup_docs_agent(config, vault_client)
+        agent_id, task_topic, toolbox, llm_config, context_manager, qpulse_client = setup_predictive_analyst_agent(config, vault_client)
+    elif personality == "docs":
+        agent_id, task_topic, toolbox, llm_config, context_manager, qpulse_client = setup_docs_agent(config, vault_client)
     elif personality == "reflector":
-        agent_id = REFLECTOR_AGENT_ID
-        task_topic = REFLECTOR_TASK_TOPIC
-        system_prompt = REFLECTOR_SYSTEM_PROMPT
-        toolbox, context_manager = setup_reflector_agent(config, vault_client)
-    else: # Default personality
-        agent_id = f"agentq-default-{uuid.uuid4()}"
-        task_topic = f"persistent://public/default/q.agentq.tasks.{agent_id}"
-        system_prompt = SYSTEM_PROMPT
-        toolbox = setup_default_agent(config, vault_client)
-        context_manager = ContextManager(ignite_addresses=config['ignite']['addresses'], agent_id=agent_id)
-        context_manager.connect()
+        agent_id, task_topic, toolbox, llm_config, context_manager, qpulse_client = setup_reflector_agent(config, vault_client)
+    else: # Default
+        agent_id, task_topic, toolbox, llm_config, context_manager, qpulse_client = setup_default_agent(config, vault_client)
+
 
     # The rest of the agent runs the same, regardless of personality
-    
     pulsar_client = None
     try:
-        # The agent no longer needs direct access to secrets.
-        # It interacts with other services that handle their own auth.
-        qpulse_client = QuantumPulseClient(base_url=config['qpulse_url'])
-        pulsar_client = pulsar.Client(pulsar_config['service_url'])
-        context_manager.connect()
-
-        # Producer for registration
-        reg_producer = pulsar_client.create_producer(pulsar_config['registration_topic'], schema=pulsar.schema.BytesSchema())
-        register_with_manager(reg_producer, agent_id, task_topic)
-        reg_producer.close()
-        
-        # Consumer for dedicated tasks
-        consumer = pulsar_client.subscribe(task_topic, subscription_name)
-        
-        # Producer for results
-        result_producer = pulsar_client.create_producer(pulsar_config['results_topic'], schema=pulsar.schema.BytesSchema())
-        # Producer for thoughts
-        thoughts_producer = pulsar_client.create_producer(pulsar_config['thoughts_topic'], schema=pulsar.schema.BytesSchema())
+        qpulse_client = QuantumPulseClient(base_url=config.get('qpulse_url'))
         
         # This span will be the parent for all processing spans inside the loop
         with tracer.start_as_current_span("agent_main_loop") as parent_span:
@@ -588,6 +578,10 @@ def run_agent():
             parent_span.set_attribute("agent.personality", personality)
             parent_span.set_attribute("agent.task_topic", task_topic)
             logger.info("Agent running", agent_id=agent_id, personality=personality, topic=task_topic)
+
+            register_with_manager(registration_producer, agent_id, task_topic)
+
+            consumer = pulsar_client.subscribe(task_topic, f"agentq-sub-{agent_id}")
 
             while running:
                 try:
@@ -609,7 +603,7 @@ def run_agent():
                     result_message = {
                         "id": prompt_data.get("id"), 
                         "result": final_result, 
-                        "llm_model": llm_config['model'], 
+                        "llm_model": llm_config.get('model'), 
                         "prompt": prompt_data.get("prompt"),
                         "timestamp": int(time.time() * 1000),
                         "workflow_id": prompt_data.get("workflow_id"),
@@ -631,13 +625,13 @@ def run_agent():
                     time.sleep(5)
 
     except Exception as e:
-        logger.critical("A critical error occurred, agent shutting down", error=str(e), exc_info=True)
+        logger.critical("A critical error occurred during agent setup", error=str(e), exc_info=True)
     finally:
         if pulsar_client:
             pulsar_client.close()
-        shared_pulsar_client.close()
-        context_manager.close()
-        logger.info("Agent has shut down", agent_id=agent_id)
+        if context_manager:
+            context_manager.disconnect()
+        logger.info("AgentQ has shut down.")
 
 def shutdown(signum, frame):
     global running
@@ -645,6 +639,13 @@ def shutdown(signum, frame):
     running = False
 
 if __name__ == "__main__":
+    # Start health check server in a separate thread
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
+    
+    # Set up signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
+    
+    # Run the main agent loop
     run_agent()

@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: agentq-devops
 spec:
-  replicas: 1 # We only need one of this specialized agent
+  replicas: 2
   selector:
     matchLabels:
       app: agentq-devops
@@ -15,6 +15,20 @@ spec:
       containers:
       - name: agentq
         image: your-repo/agentq:latest # Replace with your image repository
+        ports:
+        - containerPort: 8000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 15
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 45
+          periodSeconds: 30
         env:
         - name: AGENT_PERSONALITY
           value: "devops"

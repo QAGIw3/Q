@@ -6,6 +6,7 @@ from structlog.types import Processor
 from typing import List, Optional
 
 from .pulsar_logging import PulsarLogHandler
+from .logging_processors import add_opentelemetry_spans
 
 def setup_logging(log_level: str = "INFO", service_name: Optional[str] = None):
     """
@@ -33,6 +34,7 @@ def setup_logging(log_level: str = "INFO", service_name: Optional[str] = None):
     processors: List[Processor] = [
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
+        add_opentelemetry_spans, # Add our custom processor
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,

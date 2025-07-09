@@ -5,7 +5,7 @@ import uvicorn
 import yaml
 import structlog
 
-from managerQ.app.api import tasks, goals, dashboard_ws, agent_tasks, workflows
+from managerQ.app.api import tasks, goals, dashboard_ws, agent_tasks, workflows, search
 from managerQ.app.core.agent_registry import AgentRegistry, agent_registry as agent_registry_instance
 from managerQ.app.core.task_dispatcher import TaskDispatcher, task_dispatcher as task_dispatcher_instance
 from managerQ.app.core.result_listener import ResultListener, result_listener as result_listener_instance
@@ -18,6 +18,7 @@ from shared.observability.logging_config import setup_logging
 from shared.observability.metrics import setup_metrics
 from managerQ.app.core.goal_manager import GoalManager, goal_manager
 from managerQ.app.core.goal import Goal
+from shared.vault_client import VaultClient
 
 # --- Logging and Metrics ---
 setup_logging(service_name=settings.service_name)
@@ -42,11 +43,18 @@ def load_predefined_goals():
         logger.error(f"Failed to load pre-defined goals: {e}", exc_info=True)
 
 
-def load_config():
-    with open("managerQ/config/manager.yaml", 'r') as f:
-        return yaml.safe_load(f)
+def load_config_from_vault():
+    """Loads configuration from Vault."""
+    try:
+        vault_client = VaultClient(role="managerq-role")
+        # The entire config is the secret's data
+        config = vault_client.read_secret_data("secret/data/managerq/config")
+        return config
+    except Exception as e:
+        logger.critical(f"Failed to load configuration from Vault: {e}", exc_info=True)
+        raise
 
-config = load_config()
+config = load_config_from_vault()
 pulsar_config = config['pulsar']
 
 # --- FastAPI App ---
@@ -117,6 +125,7 @@ app.include_router(goals.router, prefix="/v1/goals", tags=["Goals"])
 app.include_router(dashboard_ws.router, prefix="/v1/dashboard", tags=["Dashboard"])
 app.include_router(agent_tasks.router, prefix="/v1/agent-tasks", tags=["Agent Tasks"])
 app.include_router(workflows.router, prefix="/v1/workflows", tags=["Workflows"])
+app.include_router(search.router, prefix="/v1/search", tags=["Search"])
 
 @app.get("/health", tags=["Health"])
 def health_check():

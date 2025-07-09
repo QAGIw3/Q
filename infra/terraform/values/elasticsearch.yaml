@@ -22,4 +22,4 @@ cluster:
   env:
     # Set any necessary environment variables for the cluster
     # For example, discovery settings if needed.
-    discovery.type: "single-node" # For local development 
+    # discovery.type: "single-node" # For local development 

@@ -15,6 +15,20 @@ spec:
       containers:
       - name: agentq
         image: your-repo/agentq:latest # Replace with your image repository
+        ports:
+        - containerPort: 8000 # Add a port for the health check
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 15
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 45
+          periodSeconds: 30
         env:
         - name: AGENT_PERSONALITY
           value: "default"

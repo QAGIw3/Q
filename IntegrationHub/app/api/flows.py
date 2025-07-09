@@ -203,6 +203,99 @@ PREDEFINED_FLOWS: Dict[str, Dict[str, Any]] = {
                 }
             }
         ]
+    },
+    "create-jira-issue": {
+        "id": "create-jira-issue",
+        "name": "Create Jira Issue",
+        "description": "Creates a new issue in a Jira project.",
+        "trigger": {
+            "type": "manual",
+            "configuration": {
+                "parameters": ["project_key", "summary", "description", "issue_type"]
+            }
+        },
+        "steps": [
+            {
+                "name": "create_issue",
+                "connector_id": "http",
+                "credential_id": "jira-credentials", # Expects a secret with 'username' and 'api_token'
+                "configuration": {
+                    "action_id": "post",
+                    # The jira_url would come from a global config, but is hardcoded here for example
+                    "url": "https://your-jira-instance.atlassian.net/rest/api/2/issue",
+                    "auth_method": "basic", # The http connector would need to support this
+                    "json_template": {
+                        "fields": {
+                            "project": {
+                                "key": "{{ trigger.project_key }}"
+                            },
+                            "summary": "{{ trigger.summary }}",
+                            "description": "{{ trigger.description }}",
+                            "issuetype": {
+                                "name": "{{ trigger.issue_type | default('Task') }}"
+                            }
+                        }
+                    }
+                },
+                "dependencies": []
+            }
+        ]
+    },
+    "ingest-github-issues-to-search": {
+        "id": "ingest-github-issues-to-search",
+        "name": "Ingest GitHub Issues to Cognitive Search",
+        "description": "Fetches recent issues from a GitHub repo and ingests them into VectorStoreQ and KnowledgeGraphQ.",
+        "trigger": {
+            "type": "manual",
+            "configuration": {
+                "parameters": ["repo_owner", "repo_name"]
+            }
+        },
+        "steps": [
+            {
+                "name": "fetch_issues",
+                "connector_id": "github",
+                "credential_id": "github-pat",
+                "configuration": {
+                    "action_id": "get_issues",
+                    "repo": "{{ trigger.repo_owner }}/{{ trigger.repo_name }}",
+                    "state": "open"
+                },
+                "dependencies": []
+            },
+            {
+                "name": "ingest_to_vectorstore",
+                "connector_id": "http", # Assuming a direct HTTP call to VectorStoreQ
+                "credential_id": "vectorstoreq-service-token",
+                "dependencies": ["fetch_issues"],
+                "configuration": {
+                    "action_id": "ingest_batch",
+                    "method": "POST",
+                    "url": "http://vectorstoreq:8000/v1/ingest/batch",
+                    "json_template": {
+                        "collection_name": "github_issues",
+                        "documents": "{{ fetch_issues.result | map(attribute='body') | list }}",
+                        "metadatas": "{{ fetch_issues.result }}"
+                    }
+                }
+            },
+            {
+                "name": "ingest_to_knowledgegraph",
+                "connector_id": "http", # Assuming a direct HTTP call to KnowledgeGraphQ
+                "credential_id": "knowledgegraphq-service-token",
+                "dependencies": ["fetch_issues"],
+                "configuration": {
+                    "action_id": "ingest_batch",
+                    "method": "POST",
+                    "url": "http://knowledgegraphq:8000/v1/ingest/batch",
+                    "json_template": {
+                        "source": "github",
+                        "type": "issue",
+                        "records": "{{ fetch_issues.result }}"
+                    }
+                }
+            }
+        ]
     }
 }
 

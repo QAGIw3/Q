@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback, useContext } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import ReactFlow, { addEdge, Connection, Edge, Node, Position, Handle } from 'reactflow';
 import 'reactflow/dist/style.css';
 import './WorkflowVisualizer.css';
-import { AuthContext } from '../../AuthContext';
+import { getWorkflow, approveWorkflowTask, connectToDashboardSocket, disconnectFromDashboardSocket } from '../../services/managerAPI';
 import dagre from 'dagre';
 
 const dagreGraph = new dagre.graphlib.Graph();
@@ -81,17 +81,16 @@ const workflowToElements = (workflow: any): { nodes: Node[], edges: Edge[] } => 
 
 const ApprovalNode = ({ data }: { data: any }) => {
     const handleApproval = async (approved: boolean) => {
+        // The data object from ReactFlow node contains what we need
         const { workflowId, label } = data;
         const taskId = label.split(': ')[1];
-        
-        // This is a simplified way to get the token. A better approach would be to use a context or a dedicated hook.
-        const token = localStorage.getItem('react-token'); 
-        
-        await fetch(`http://localhost:8001/api/v1/workflows/${workflowId}/tasks/${taskId}/approve`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ approved }),
-        });
+        try {
+            await approveWorkflowTask(workflowId, taskId, approved);
+            // The UI will update automatically via the WebSocket message
+        } catch (error) {
+            console.error("Failed to submit approval:", error);
+            alert("Failed to submit approval.");
+        }
     };
 
     return (
@@ -117,58 +116,49 @@ const nodeTypes = {
 const WorkflowVisualizer: React.FC<{ workflowId: string }> = ({ workflowId }) => {
     const [nodes, setNodes] = useState<Node[]>([]);
     const [edges, setEdges] = useState<Edge[]>([]);
-    const authContext = useContext(AuthContext);
+    const [error, setError] = useState<string | null>(null);
+
+    const fetchWorkflow = useCallback(async () => {
+        if (!workflowId) return;
+        try {
+            const workflowData = await getWorkflow(workflowId);
+            const { nodes: initialNodes, edges: initialEdges } = workflowToElements(workflowData);
+            const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+                initialNodes,
+                initialEdges
+            );
+            setNodes(layoutedNodes);
+            setEdges(layoutedEdges);
+            setError(null);
+        } catch (error: any) {
+            console.error("Error fetching workflow:", error);
+            setError(error.message || "Failed to load workflow.");
+        }
+    }, [workflowId]);
 
     useEffect(() => {
-        if (!authContext?.token) return;
+        fetchWorkflow();
 
-        const ws = new WebSocket(`ws://localhost:8001/api/v1/dashboard/ws`);
-
-        ws.onmessage = (event) => {
-            const eventData = JSON.parse(event.data);
+        connectToDashboardSocket((eventData: any) => {
             if (eventData.workflow_id !== workflowId) return;
 
-            setNodes((nds) => {
-                const newNodes = [...nds];
-                const existingNode = newNodes.find((n) => n.id === eventData.task_id);
-                if (existingNode) {
-                    existingNode.data = { ...existingNode.data, status: eventData.data.status };
-                }
-                return newNodes;
-            });
-        };
-
-        return () => ws.close();
-    }, [workflowId, authContext?.token]);
-    
-    useEffect(() => {
-        if (!authContext?.token || !workflowId) return;
-
-        const fetchWorkflow = async () => {
-            try {
-                const response = await fetch(`http://localhost:8001/api/v1/workflows/${workflowId}`, {
-                    headers: { 'Authorization': `Bearer ${authContext.token}` }
-                });
-                if (!response.ok) throw new Error('Failed to fetch workflow');
-                const workflowData = await response.json();
-                
-                const { nodes: initialNodes, edges: initialEdges } = workflowToElements(workflowData);
-                const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-                    initialNodes,
-                    initialEdges
-                );
-                setNodes(layoutedNodes);
-                setEdges(layoutedEdges);
-            } catch (error) {
-                console.error("Error fetching workflow:", error);
+            // When a task status updates, or the workflow completes, re-fetch everything
+            // This is simpler than patching the state and ensures consistency.
+            if (eventData.event_type === 'TASK_STATUS_UPDATE' || eventData.event_type === 'WORKFLOW_COMPLETED') {
+                fetchWorkflow();
             }
+        });
+
+        return () => {
+            disconnectFromDashboardSocket();
         };
-
-        fetchWorkflow();
-    }, [workflowId, authContext?.token]);
-
+    }, [workflowId, fetchWorkflow]);
 
     const onConnect = (params: Connection | Edge) => setEdges((eds) => addEdge(params, eds));
+
+    if (error) {
+        return <div className="error-message">{error}</div>
+    }
 
     return (
         <div style={{ height: '500px', border: '1px solid #ccc' }}>

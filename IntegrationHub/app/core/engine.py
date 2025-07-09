@@ -2,8 +2,11 @@ import logging
 import asyncio
 import json
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+import jinja2
+from collections import deque
 
+from app.models.flow import Flow, FlowStep
 from app.models.connector import Connector, ConnectorAction
 from app.connectors.zulip.zulip_connector import zulip_connector
 from app.connectors.smtp.email_connector import email_connector
@@ -29,84 +32,109 @@ AVAILABLE_CONNECTORS: Dict[str, Connector] = {
 class FlowExecutionEngine:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        self._jinja_env = jinja2.Environment(loader=jinja2.BaseLoader())
 
-    def _render_configuration(self, config: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        """Renders placeholders in a configuration dict using values from the context."""
-        # Convert config to JSON string to find all placeholders
-        config_str = json.dumps(config)
-        
-        # Find all placeholders like {{ key }} or {{ nested.key }}
-        placeholders = re.findall(r"\{\{\s*([\w\.]+)\s*\}\}", config_str)
-        
-        for placeholder in placeholders:
-            # Resolve the placeholder value from the context
-            value = context
+    def _topologically_sort_steps(self, steps: List[FlowStep]) -> List[FlowStep]:
+        """
+        Performs a topological sort on the flow steps based on their dependencies.
+        Returns a list of steps in a valid execution order.
+        Raises ValueError if a cycle is detected or a dependency is not found.
+        """
+        step_map = {step.name: step for step in steps}
+        in_degree = {step.name: 0 for step in steps}
+        adj = {step.name: [] for step in steps}
+
+        for step in steps:
+            for dep in step.dependencies:
+                if dep not in step_map:
+                    raise ValueError(f"Step '{step.name}' has an unknown dependency: '{dep}'")
+                adj[dep].append(step.name)
+                in_degree[step.name] += 1
+
+        queue = deque([name for name, degree in in_degree.items() if degree == 0])
+        sorted_order = []
+
+        while queue:
+            u = queue.popleft()
+            sorted_order.append(step_map[u])
+            for v_name in adj[u]:
+                in_degree[v_name] -= 1
+                if in_degree[v_name] == 0:
+                    queue.append(v_name)
+
+        if len(sorted_order) != len(steps):
+            raise ValueError("A cycle was detected in the flow's dependencies.")
+
+        return sorted_order
+
+    def _render_template(self, template_str: str, context: Dict[str, Any]) -> Any:
+        """Renders a Jinja2 template string with the given context."""
+        if not template_str:
+            return context
+        try:
+            template = self._jinja_env.from_string(template_str)
+            rendered_str = template.render(context)
+            # Try to parse as JSON, fall back to raw string if it fails
             try:
-                for key in placeholder.split('.'):
-                    if isinstance(value, dict):
-                        value = value.get(key)
-                    else:
-                        value = None
-                        break
-            except (KeyError, TypeError):
-                value = None
+                return json.loads(rendered_str)
+            except json.JSONDecodeError:
+                return rendered_str
+        except Exception as e:
+            self.logger.error(f"Failed to render input template: {e}", exc_info=True)
+            raise
 
-            # Replace the placeholder. Be careful to handle different types correctly.
-            # This simplified approach converts all replacements to strings within the JSON structure.
-            # A more robust solution might handle types more granularly.
-            if value is not None:
-                config_str = config_str.replace(f"{{{{ {placeholder} }}}}", json.dumps(value).strip('"'))
-
-        return json.loads(config_str)
-
-    async def _execute_step(self, step_config: Dict[str, Any], data_context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        connector_id = step_config.get("connector_id")
-        credential_id = step_config.get("credential_id")
-        action_id = step_config.get("action_id", "default_action") # Default action if not specified
+    async def _execute_step(self, step_config: FlowStep, flow_context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        connector_id = step_config.connector_id
         
-        # Render the step's configuration using the current flow context
-        rendered_params = self._render_configuration(step_config.get("configuration", {}), data_context)
+        # 1. Render the input for this step from the overall flow context
+        step_input = self._render_template(step_config.input_template, flow_context)
+
+        # 2. Prepare the action for the connector
+        action = ConnectorAction(
+            action_id=step_config.configuration.get("action_id", "default_action"),
+            credential_id=step_config.credential_id,
+            configuration=step_config.configuration
+        )
+        
+        self.logger.info(f"Executing action '{action.action_id}' on connector '{connector_id}'")
 
         if connector_id not in AVAILABLE_CONNECTORS:
             raise ValueError(f"Connector '{connector_id}' not found.")
-
+        
         connector = AVAILABLE_CONNECTORS[connector_id]
         
-        # Prepare action for the connector
-        action = ConnectorAction(
-            action_id=action_id,
-            credential_id=credential_id,
-            configuration=rendered_params
-        )
-        
-        self.logger.info(f"Executing action '{action.action_id}' on connector '{connector.connector_id}'")
-
-        # Execute and return the result, which will become the context for the next step
-        result = await connector.execute(action, configuration=action.configuration, data_context=data_context)
+        # 3. Execute and return the result
+        result = await connector.execute(action, configuration=action.configuration, data_context=step_input)
         return result
 
-    async def run_flow(self, flow: Dict[str, Any], data_context: Dict[str, Any]):
-        self.logger.info(f"--- Running Flow: {flow.get('name')} ---")
+    async def run_flow(self, flow_model: Flow, initial_context: Dict[str, Any]):
+        self.logger.info(f"--- Running Flow: {flow_model.name} ---")
         
-        current_context = data_context
-        self.logger.info(f"    Initial data context: {current_context}")
+        try:
+            sorted_steps = self._topologically_sort_steps(flow_model.steps)
+            self.logger.info(f"Execution order: {[s.name for s in sorted_steps]}")
+        except ValueError as e:
+            self.logger.error(f"Flow validation failed: {e}", exc_info=True)
+            return
 
-        for step in flow.get("steps", []):
-            self.logger.info(f"  - Executing step: {step.get('name')}")
+        # This context holds the results from all completed steps
+        flow_context = {"trigger": initial_context}
+
+        for step in sorted_steps:
+            self.logger.info(f"  - Executing step: {step.name}")
             try:
-                # The output of a step becomes the input context for the next
-                step_result = await self._execute_step(step, current_context)
+                step_result = await self._execute_step(step, flow_context)
                 
                 if step_result:
-                    current_context = {**current_context, **step_result} # Merge results into context
-
-                self.logger.info(f"    Step '{step.get('name')}' completed. New context keys: {list(step_result.keys()) if step_result else []}")
+                    # Add the result of this step to the global flow context
+                    flow_context[step.name] = step_result
+                    self.logger.info(f"    Step '{step.name}' completed.")
 
             except Exception as e:
-                self.logger.error(f"    ERROR: Step '{step.get('name')}' failed: {e}", exc_info=True)
+                self.logger.error(f"    ERROR: Step '{step.name}' failed: {e}", exc_info=True)
                 # In a real engine, we'd have error handling, retries, etc.
                 break # Stop flow on first failure
-        self.logger.info(f"--- Flow Finished: {flow.get('name')} ---")
+        self.logger.info(f"--- Flow Finished: {flow_model.name} ---")
 
     async def run_flow_by_id(self, flow_id: str, data_context: Dict[str, Any]):
         """Finds a pre-defined flow by its ID and runs it."""
@@ -114,8 +142,8 @@ class FlowExecutionEngine:
             self.logger.error(f"Attempted to run non-existent flow with ID: {flow_id}")
             raise ValueError(f"Flow with ID '{flow_id}' not found.")
         
-        flow_config = PREDEFINED_FLOWS[flow_id]
-        await self.run_flow(flow_config, data_context)
-
+        flow_data = PREDEFINED_FLOWS[flow_id]
+        flow_model = Flow(**flow_data) # Validate with Pydantic model
+        await self.run_flow(flow_model, data_context)
 
 engine = FlowExecutionEngine() 

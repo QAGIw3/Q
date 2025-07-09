@@ -1,7 +1,11 @@
 from fastapi import FastAPI, Request
 from prometheus_client import Counter, Histogram, start_http_server, REGISTRY
+from prometheus_client.exposition import generate_latest
 import time
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # --- Prometheus Metrics Definitions ---
 
@@ -19,22 +23,37 @@ LATENCY = Histogram(
     ["method", "path"]
 )
 
-def setup_metrics(app: FastAPI, app_name: str, port: int = 8000):
+# --- Standard Metrics ---
+
+# --- Workflow Metrics ---
+WORKFLOW_COMPLETED_COUNTER = Counter(
+    "workflow_completed_total",
+    "Total number of completed workflows",
+    ["status"] # e.g., 'COMPLETED', 'FAILED'
+)
+
+WORKFLOW_DURATION_HISTOGRAM = Histogram(
+    "workflow_duration_seconds",
+    "Histogram of workflow execution time in seconds"
+)
+
+TASK_COMPLETED_COUNTER = Counter(
+    "task_completed_total",
+    "Total number of completed tasks",
+    ["status"] # e.g., 'COMPLETED', 'FAILED', 'CANCELLED'
+)
+
+def setup_metrics(app: FastAPI, app_name: str):
     """
-    Sets up Prometheus metrics for a FastAPI application.
-    - Adds a middleware to track request metrics.
-    - Starts an HTTP server to expose the /metrics endpoint.
+    Sets up Prometheus metrics for the FastAPI application.
+    It adds middleware to track HTTP requests and starts a metrics server.
+    The metrics server port is configured via the METRICS_PORT env var.
     """
-    # This is a bit of a workaround for running the metrics server
-    # in a separate thread. In a production environment with Gunicorn,
-    # you might use the prometheus_client multiprocess mode.
-    # See: https://github.com/prometheus/client_python#multiprocess-mode
-    
-    # Start the Prometheus metrics server in a daemon thread
-    # The port for the metrics server should be different from the main app port
-    metrics_port = int(os.environ.get("METRICS_PORT", 9091))
+    metrics_port = int(os.environ.get("METRICS_PORT", 8000))
+
+    # Start the Prometheus metrics server in a background thread
     start_http_server(metrics_port)
-    print(f"Prometheus metrics server started on port {metrics_port}")
+    logger.info(f"Prometheus metrics server started for {app_name} on port {metrics_port}")
 
     @app.middleware("http")
     async def track_metrics(request: Request, call_next):
@@ -50,6 +69,4 @@ def setup_metrics(app: FastAPI, app_name: str, port: int = 8000):
         LATENCY.labels(method=request.method, path=path).observe(latency)
         REQUESTS.labels(method=request.method, path=path, status_code=response.status_code).inc()
         
-        return response
-
-    print(f"Prometheus metrics middleware configured for {app_name}.") 
+        return response 

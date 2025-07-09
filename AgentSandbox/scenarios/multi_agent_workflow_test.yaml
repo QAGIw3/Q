@@ -1,0 +1,45 @@
+# AgentSandbox/scenarios/multi_agent_workflow_test.yaml
+name: "Multi-Agent Workflow Test"
+description: "Triggers a complex workflow that requires multiple agents and asserts on the final state."
+
+# The managerQ API endpoint to interact with
+manager_endpoint: "http://localhost:8003/v1" # Assuming managerQ runs on port 8003
+
+# 1. The initial prompt that kicks off the workflow
+trigger:
+  prompt: "The user login is failing with a 500 error. The error seems to be a NullPointerException in the AuthService. Please investigate, propose a code fix as a new pull request, and then notify the user via email."
+  context:
+    user_id: "test-user-123"
+    user_email: "test.user@example.com"
+    repo_to_fix: "q-platform/auth-service"
+
+# 2. A series of assertions to run after the workflow completes
+# The runner will poll the workflow status until it is COMPLETED or FAILED.
+# These assertions are checked against the final state of the workflow object.
+assertions:
+  - type: workflow_status
+    description: "The overall workflow should complete successfully."
+    expected: COMPLETED
+    
+  - type: task_status
+    description: "The 'propose_fix' task, which creates the PR, must have completed."
+    task_id: "propose_fix" # Assumes the workflow definition has a task with this ID
+    expected: COMPLETED
+
+  - type: task_status
+    description: "The 'notify_user' task, which sends the email, must have completed."
+    task_id: "notify_user"
+    expected: COMPLETED
+
+  # This is a placeholder for a more advanced assertion that would query an external service.
+  # The runner would need to be extended to handle this.
+  # - type: external_check
+  #   description: "A pull request should have been created."
+  #   connector: "http"
+  #   config:
+  #     url: "http://integrationhub:8002/..."
+  #     params:
+  #       repo: "q-platform/auth-service"
+  #   expected_result:
+  #     path: "pull_requests[0].state"
+  #     value: "OPEN" 

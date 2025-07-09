@@ -2,6 +2,7 @@ import yaml
 import logging
 from pydantic import BaseModel
 from typing import Optional, List
+from shared.vault_client import VaultClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,23 +54,21 @@ class AppConfig(BaseModel):
 
 _config: Optional[AppConfig] = None
 
-def load_config(path: str = "H2M/config/h2m.yaml") -> AppConfig:
+def load_config() -> AppConfig:
     global _config
     if _config:
         return _config
 
     try:
-        with open(path, "r") as f:
-            config_data = yaml.safe_load(f)
+        logger.info("Loading H2M configuration from Vault...")
+        vault_client = VaultClient(role="h2m-role")
+        config_data = vault_client.read_secret_data("secret/data/h2m/config")
         
         _config = AppConfig(**config_data)
-        logger.info("H2M configuration loaded and validated successfully.")
+        logger.info("H2M configuration loaded and validated successfully from Vault.")
         return _config
-    except FileNotFoundError:
-        logger.error(f"Configuration file not found at path: {path}", exc_info=True)
-        raise
     except Exception as e:
-        logger.error(f"Error parsing or validating H2M configuration file: {e}", exc_info=True)
+        logger.error(f"Error loading H2M configuration from Vault: {e}", exc_info=True)
         raise
 
 def get_config() -> AppConfig:

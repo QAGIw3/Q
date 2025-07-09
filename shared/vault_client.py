@@ -51,6 +51,23 @@ class VaultClient:
 
         raise ConnectionError("Failed to authenticate with Vault. No valid k8s token or VAULT_TOKEN found.")
 
+    def read_secret_data(self, path: str) -> dict:
+        """
+        Reads the entire data payload from a secret at a given path.
+
+        Args:
+            path: The path to the secret in Vault (e.g., 'secret/data/managerq/config').
+
+        Returns:
+            A dictionary containing the secret data.
+        """
+        try:
+            response = self.client.secrets.kv.v2.read_secret_version(path=path)
+            return response['data']['data']
+        except Exception as e:
+            logger.error(f"Failed to read secret data from path '{path}': {e}", exc_info=True)
+            raise
+
     def read_secret(self, path: str, key: str) -> str:
         """
         Reads a specific key from a secret at a given path.

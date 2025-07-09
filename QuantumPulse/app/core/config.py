@@ -2,6 +2,7 @@ import yaml
 import logging
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
+from shared.vault_client import VaultClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -62,9 +63,9 @@ class AppConfig(BaseModel):
 
 _config: Optional[AppConfig] = None
 
-def load_config(path: str = "config/quantumpulse.yaml") -> AppConfig:
+def load_config() -> AppConfig:
     """
-    Loads, validates, and returns the application configuration.
+    Loads, validates, and returns the application configuration from Vault.
     Caches the configuration after the first load.
     """
     global _config
@@ -72,17 +73,15 @@ def load_config(path: str = "config/quantumpulse.yaml") -> AppConfig:
         return _config
 
     try:
-        with open(path, "r") as f:
-            config_data = yaml.safe_load(f)
+        logger.info("Loading QuantumPulse configuration from Vault...")
+        vault_client = VaultClient(role="quantumpulse-role")
+        config_data = vault_client.read_secret_data("secret/data/quantumpulse/config")
         
         _config = AppConfig(**config_data)
-        logger.info("Application configuration loaded and validated successfully.")
+        logger.info("Application configuration loaded and validated successfully from Vault.")
         return _config
-    except FileNotFoundError:
-        logger.error(f"Configuration file not found at path: {path}", exc_info=True)
-        raise
-    except (yaml.YAMLError, TypeError, ValueError) as e:
-        logger.error(f"Error parsing or validating configuration file: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error loading QuantumPulse configuration from Vault: {e}", exc_info=True)
         raise
 
 def get_config() -> AppConfig:
