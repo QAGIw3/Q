@@ -1,0 +1,20 @@
+// WebAppQ/app/src/pages/MyWorkflowsPage.tsx
+import React, { useState, useEffect } from 'react';
+import { Container, Typography, List, ListItem, ListItemText, IconButton, ListItemSecondaryAction } from '@mui/material';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+// ... (imports)
+
+// ... (component definition)
+            <List>
+                {workflows.map(wf => (
+                    <ListItem key={wf.workflow_id}>
+                        <ListItemText primary={wf.original_prompt} secondary={`ID: ${wf.workflow_id}`} />
+                        <ListItemSecondaryAction>
+                            <IconButton edge="end" aria-label="run" onClick={() => handleRunWorkflow(wf.workflow_id)}>
+                                <PlayArrowIcon />
+                            </IconButton>
+                        </ListItemSecondaryAction>
+                    </ListItem>
+                ))}
+            </List>
+// ... (rest of component) 

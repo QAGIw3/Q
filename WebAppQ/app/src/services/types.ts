@@ -51,4 +51,32 @@ export interface UserCreate {
     password: string;
     first_name?: string;
     last_name?: string;
+}
+
+// --- Workflow Models ---
+export interface WorkflowTask {
+    task_id: string;
+    type: 'task';
+    agent_personality: string;
+    prompt: string;
+    dependencies: string[];
+    condition?: string;
+}
+
+export interface ApprovalBlock {
+    task_id: string;
+    type: 'approval';
+    message: string;
+    required_roles: string[];
+    dependencies: string[];
+}
+
+export type TaskBlock = WorkflowTask | ApprovalBlock;
+
+export interface Workflow {
+    workflow_id: string;
+    original_prompt: string;
+    status: string; // Add this line
+    tasks: TaskBlock[];
+    shared_context: Record<string, any>;
 } 

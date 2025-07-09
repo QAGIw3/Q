@@ -64,6 +64,14 @@ class WorkflowManager:
         logger.info(f"Creating workflow: {workflow.workflow_id}")
         self._cache.put(workflow.workflow_id, workflow.dict())
 
+    def start_workflow(self, workflow: Workflow):
+        """
+        Starts or resumes a workflow by calling the executor.
+        This is a convenience method that might be the same as create for now,
+        but could have different logic in the future (e.g., for resuming).
+        """
+        self.create_workflow(workflow)
+
     def get_workflow(self, workflow_id: str) -> Optional[Workflow]:
         """Retrieves a workflow from the cache."""
         workflow_data = self._cache.get(workflow_id)

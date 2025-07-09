@@ -98,4 +98,16 @@ variable "keycloak_issuer_url" {
   type        = string
   description = "The OIDC issuer URL for the Keycloak realm."
   default     = "http://localhost:8080/realms/q-platform" # Example default for local dev
+}
+
+variable "primary_region" {
+  description = "The primary region for the deployment."
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "secondary_region" {
+  description = "The secondary region for disaster recovery."
+  type        = string
+  default     = "us-west-2"
 } 

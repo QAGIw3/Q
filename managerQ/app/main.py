@@ -6,7 +6,7 @@ import yaml
 import structlog
 from contextlib import asynccontextmanager
 
-from managerQ.app.api import tasks, goals, dashboard_ws, agent_tasks, workflows, search, model_registry, planner
+from managerQ.app.api import tasks, goals, dashboard_ws, agent_tasks, workflows, search, model_registry, planner, user_workflows, observability_ws
 from managerQ.app.core.agent_registry import AgentRegistry, agent_registry as agent_registry_instance
 from managerQ.app.core.task_dispatcher import TaskDispatcher, task_dispatcher as task_dispatcher_instance
 from managerQ.app.core.result_listener import ResultListener, result_listener as result_listener_instance
@@ -23,6 +23,7 @@ from shared.vault_client import VaultClient
 from shared.q_vectorstore_client.client import VectorStoreClient
 from shared.q_knowledgegraph_client.client import KnowledgeGraphClient
 from shared.q_pulse_client.client import QuantumPulseClient
+from managerQ.app.core.user_workflow_store import user_workflow_store
 
 # --- Logging and Metrics ---
 setup_logging(service_name=settings.service_name)
@@ -79,6 +80,7 @@ async def lifespan(app: FastAPI):
     app.state.pulse_client = QuantumPulseClient(base_url=quantumpulse_config.get('url'))
     
     # Initialize and start background services
+    await user_workflow_store.connect()
     dashboard_ws.manager.startup()
     
     global agent_registry_instance, task_dispatcher_instance, result_listener_instance
@@ -157,6 +159,8 @@ app.include_router(workflows.router, prefix="/v1/workflows", tags=["Workflows"])
 app.include_router(search.router, prefix="/v1/search", tags=["Search"])
 app.include_router(model_registry.router, prefix="/v1/model-registry", tags=["Model Registry"])
 app.include_router(planner.router, prefix="/v1/planner", tags=["Planner"])
+app.include_router(user_workflows.router, prefix="/v1/user-workflows", tags=["User Workflows"])
+app.include_router(observability_ws.router, prefix="/v1/observability", tags=["Observability"])
 
 @app.get("/health", tags=["Health"])
 def health_check():

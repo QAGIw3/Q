@@ -4,10 +4,12 @@ import { Box, Typography, AppBar, Toolbar, Button, CircularProgress, Container }
 import { AuthContext, AuthProvider } from './AuthContext';
 import Chat from './components/Chat/Chat';
 import { WorkflowsPage } from './pages/WorkflowsPage';
+import { MyWorkflowsPage } from './pages/MyWorkflowsPage';
 import { WorkflowDetailPage } from './pages/WorkflowDetailPage';
 import { SearchPage } from './pages/SearchPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { ApprovalsPage } from './pages/ApprovalsPage';
+import { WorkflowStudioPage } from './pages/WorkflowStudioPage';
 import { ToastNotification } from './components/common/ToastNotification';
 import { connectToDashboardSocket, disconnectFromDashboardSocket } from './services/managerAPI';
 
@@ -83,9 +85,10 @@ function App() {
             <Link to="/" style={{ textDecoration: 'none', color: 'inherit' }}>Q Platform</Link>
           </Typography>
           <Button color="inherit" component={Link} to="/chat">Chat</Button>
-          <Button color="inherit" component={Link} to="/workflows">Workflows</Button>
+          <Button color="inherit" component={Link} to="/workflows">My Workflows</Button>
           <Button color="inherit" component={Link} to="/search">Search</Button>
           <Button color="inherit" component={Link} to="/approvals">Approvals</Button>
+          <Button color="inherit" component={Link} to="/studio">Studio</Button>
           <Button color="inherit" onClick={() => authContext.logout && authContext.logout()}>Logout</Button>
         </Toolbar>
       </AppBar>
@@ -93,8 +96,9 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/approvals" element={<RequireAuth><ApprovalsPage /></RequireAuth>} />
+        <Route path="/studio" element={<RequireAuth><WorkflowStudioPage /></RequireAuth>} />
         <Route path="/chat" element={<RequireAuth><Chat /></RequireAuth>} />
-        <Route path="/workflows" element={<RequireAuth><WorkflowsPage /></RequireAuth>} />
+        <Route path="/workflows" element={<RequireAuth><MyWorkflowsPage /></RequireAuth>} />
         <Route path="/workflows/:workflowId" element={<RequireAuth><WorkflowDetailPage /></RequireAuth>} />
         <Route path="/search" element={<RequireAuth><SearchPage /></RequireAuth>} />
       </Routes>

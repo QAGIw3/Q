@@ -12,8 +12,13 @@ terraform {
 }
 
 provider "kubernetes" {
-  # Configuration options for the Kubernetes provider
-  # Assumes that kubectl is configured to point to the correct cluster.
+  alias = "primary"
+  # Configuration for the primary region's cluster
+}
+
+provider "kubernetes" {
+  alias = "secondary"
+  # Configuration for the secondary region's cluster
 }
 
 provider "helm" {
@@ -61,7 +66,22 @@ resource "helm_repository" "hashicorp" {
 
 # --- Helm Releases for Core Infrastructure ---
 
-resource "helm_release" "keycloak" {
+resource "helm_release" "keycloak_primary" {
+  provider   = kubernetes.primary
+  name       = "keycloak"
+  repository = helm_repository.bitnami.name
+  chart      = "keycloak"
+  version    = "18.2.1" # Pinning version for stability
+  namespace  = "q-platform"
+  create_namespace = true
+
+  values = [
+    file("${path.module}/values/keycloak.yaml")
+  ]
+}
+
+resource "helm_release" "keycloak_secondary" {
+  provider   = kubernetes.secondary
   name       = "keycloak"
   repository = helm_repository.bitnami.name
   chart      = "keycloak"

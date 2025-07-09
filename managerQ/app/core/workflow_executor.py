@@ -16,6 +16,7 @@ from shared.pulsar_tracing import inject_trace_context, extract_trace_context
 from opentelemetry import trace
 from shared.observability.metrics import WORKFLOW_COMPLETED_COUNTER, WORKFLOW_DURATION_HISTOGRAM, TASK_COMPLETED_COUNTER
 from managerQ.app.dependencies import get_kg_client # Import the dependency provider
+from managerQ.app.core.observability_manager import observability_manager
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -209,11 +210,16 @@ class WorkflowExecutor:
             workflow_manager.update_workflow(workflow)
             logger.info(f"Workflow '{workflow.workflow_id}' has finished with status '{final_status.value}'.")
             
+            # Broadcast to the old dashboard and the new observability dashboard
             asyncio.run(broadcast_workflow_event(WorkflowEvent(
                 event_type="WORKFLOW_COMPLETED",
                 workflow_id=workflow.workflow_id,
                 data={"status": final_status.value}
             )))
+            asyncio.run(observability_manager.broadcast({
+                "type": "WORKFLOW_UPDATE",
+                "payload": workflow.dict()
+            }))
             
             # Check if this was an AIOps workflow and handle the final report
             if workflow.event_id and final_status == WorkflowStatus.COMPLETED:
@@ -401,6 +407,10 @@ class WorkflowExecutor:
                 task_id=task.task_id,
                 data={"status": TaskStatus.DISPATCHED.value}
             )))
+            asyncio.run(observability_manager.broadcast({
+                "type": "WORKFLOW_UPDATE",
+                "payload": workflow.dict()
+            }))
 
         except jinja2.TemplateError as e:
             logger.error(f"Failed to render prompt for task '{task.task_id}': {e}", exc_info=True)
