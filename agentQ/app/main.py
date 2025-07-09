@@ -7,7 +7,7 @@ import logging
 import time
 import yaml
 import pulsar
-from openai import OpenAI
+import asyncio
 import fastavro
 import io
 import signal
@@ -20,6 +20,9 @@ import httpx
 from shared.opentelemetry.tracing import setup_tracing
 from shared.observability.logging_config import setup_logging
 from shared.vault_client import VaultClient
+from shared.pulsar_client import shared_pulsar_client
+from shared.q_pulse_client.client import QuantumPulseClient
+from shared.q_pulse_client.models import QPChatRequest, QPChatMessage
 from agentQ.app.core.context import ContextManager
 from agentQ.app.core.toolbox import Toolbox, Tool
 from agentQ.app.core.vectorstore_tool import vectorstore_tool
@@ -28,15 +31,23 @@ from agentQ.app.core.integrationhub_tool import integrationhub_tool
 from agentQ.app.core.knowledgegraph_tool import knowledgegraph_tool, summarize_activity_tool, find_experts_tool
 from agentQ.app.core.quantumpulse_tool import quantumpulse_tool
 from agentQ.app.core.memory_tool import save_memory_tool, search_memory_tool
+from agentQ.app.core.github_tool import github_tool
+from agentQ.app.core.ui_generation_tool import generate_table_tool
+from agentQ.app.core.meta_tools import list_tools_tool
+from agentQ.app.core.airflow_tool import trigger_dag_tool, get_dag_status_tool
+from agentQ.app.core.delegation_tool import delegation_tool
+from agentQ.app.core.code_search_tool import code_search_tool
+from agentQ.app.core.prompts import REFLEXION_PROMPT_TEMPLATE
+from agentQ.devops_agent import setup_devops_agent, DEVOPS_SYSTEM_PROMPT, AGENT_ID as DEVOPS_AGENT_ID, TASK_TOPIC as DEVOPS_TASK_TOPIC
+from agentQ.data_analyst_agent import setup_data_analyst_agent, DATA_ANALYST_SYSTEM_PROMPT, AGENT_ID as DA_AGENT_ID, TASK_TOPIC as DA_TASK_TOPIC
+from agentQ.knowledge_engineer_agent import setup_knowledge_engineer_agent, KNOWLEDGE_ENGINEER_SYSTEM_PROMPT, AGENT_ID as KE_AGENT_ID, TASK_TOPIC as KE_TASK_TOPIC
 
 # Initialize tracing and logging
 setup_tracing(app=None)
-setup_logging()
+setup_logging(service_name="agentQ")
 logger = structlog.get_logger("agentq")
 
 # --- Configuration & Logging ---
-# logging.basicConfig(level=logging.INFO) # This line is removed as per the new_code
-# logger = logging.getLogger("agentq") # This line is removed as per the new_code
 running = True
 
 # --- System Prompt ---
@@ -54,9 +65,13 @@ Example `Action` objects:
 - To provide a final answer: `{"action": "finish", "answer": "The final answer to the user."}`
 - To call a tool: `{"action": "call_tool", "tool_name": "name_of_tool", "parameters": {"arg1": "value1", "arg2": "value2"}}`
 
-Before your first turn, a search will be automatically performed against your long-term memory based on the user's prompt. The results, if any, will be provided in the first "Tool Observation". Use this information to inform your initial thoughts.
-
-At the end of a successful conversation, you will be asked to provide a concise summary of the key information and facts. This summary will be saved to your long-term memory for future use.
+**IMPORTANT STRATEGIES:**
+1.  **Delegate When Necessary:** If the user's request requires specialized knowledge (e.g., analyzing system logs, running a complex data query), you **MUST** delegate it to the appropriate specialist agent using the `delegate_task` tool.
+2.  **Collaborate via Shared Context:** When working on a multi-agent workflow, use `read_shared_context` at the beginning of your task to see findings from other agents. Use `update_shared_context` to post your own findings for others to see. The `workflow_id` required for these tools will be provided in the prompt.
+3.  **Memory First:** Before starting a complex task, especially one that feels familiar, use the `search_memory` tool to see if you've already solved a similar problem.
+4.  **Learn from Mistakes:** If a task seems complex or might fail, use the `retrieve_reflexion` tool with the user's prompt as the parameter.
+5.  **Visualize Data:** If the user asks for data that would be best viewed in a table, use the `generate_table` tool.
+6.  **Summarize Your Work:** At the end of a successful conversation, you will be asked to provide a concise summary of the key information and facts for your long-term memory.
 
 Here are the tools you have available:
 {tools}
@@ -66,23 +81,40 @@ Begin!
 
 # --- Schemas & Config ---
 PROMPT_SCHEMA = fastavro.parse_schema({
-    "namespace": "q.h2m", "type": "record", "name": "PromptMessage",
+    "namespace": "q.managerq", "type": "record", "name": "PromptMessage",
     "fields": [
-        {"name": "id", "type": "string"}, {"name": "prompt", "type": "string"},
-        {"name": "model", "type": "string"}, {"name": "timestamp", "type": "long"}
+        {"name": "id", "type": "string"},
+        {"name": "prompt", "type": "string"},
+        {"name": "model", "type": "string"},
+        {"name": "timestamp", "type": "long"},
+        {"name": "workflow_id", "type": ["null", "string"], "default": None},
+        {"name": "task_id", "type": ["null", "string"], "default": None},
     ]
 })
 RESULT_SCHEMA = fastavro.parse_schema({
     "namespace": "q.agentq", "type": "record", "name": "ResultMessage",
     "fields": [
-        {"name": "id", "type": "string"}, {"name": "result", "type": "string"},
-        {"name": "llm_model", "type": "string"}, {"name": "prompt", "type": "string"},
-        {"name": "timestamp", "type": "long"}
+        {"name": "id", "type": "string"},
+        {"name": "result", "type": "string"},
+        {"name": "llm_model", "type": "string"},
+        {"name": "prompt", "type": "string"},
+        {"name": "timestamp", "type": "long"},
+        {"name": "workflow_id", "type": ["null", "string"], "default": None},
+        {"name": "task_id", "type": ["null", "string"], "default": None},
+        {"name": "agent_personality", "type": ["null", "string"], "default": None},
     ]
 })
 REGISTRATION_SCHEMA = fastavro.parse_schema({
     "namespace": "q.managerq", "type": "record", "name": "AgentRegistration",
     "fields": [{"name": "agent_id", "type": "string"}, {"name": "task_topic", "type": "string"}]
+})
+THOUGHT_SCHEMA = fastavro.parse_schema({
+    "namespace": "q.agentq", "type": "record", "name": "ThoughtMessage",
+    "fields": [
+        {"name": "conversation_id", "type": "string"},
+        {"name": "thought", "type": "string"},
+        {"name": "timestamp", "type": "long"},
+    ]
 })
 
 def load_config():
@@ -147,48 +179,107 @@ def register_with_manager(producer, agent_id, task_topic):
     producer.send(buf.getvalue())
     logger.info("Registration message sent.")
 
-# --- ReAct Loop ---
+def generate_and_save_reflexion(user_prompt: str, scratchpad: list, context_manager: ContextManager, qpulse_client: QuantumPulseClient, llm_config: dict):
+    """Generates a reflexion and saves it to the memory cache."""
+    logger.info("Generating reflexion for failed task...")
+    
+    # Format the scratchpad for inclusion in the prompt
+    scratchpad_str = "\n".join([f"[{item['type']}] {item['content']}" for item in scratchpad])
+    
+    reflexion_prompt = REFLEXION_PROMPT_TEMPLATE.format(
+        user_prompt=user_prompt,
+        scratchpad=scratchpad_str
+    )
+    
+    try:
+        messages = [QPChatMessage(role="user", content=reflexion_prompt)]
+        request = QPChatRequest(model=llm_config['model'], messages=messages)
+        
+        response = asyncio.run(qpulse_client.get_chat_completion(request))
+        reflexion_text = response.choices[0].message.content
+        logger.info("Generated reflexion", reflexion=reflexion_text)
+        
+        # Save the reflexion to a dedicated cache for future use
+        context_manager.save_reflexion(user_prompt, reflexion_text)
+        
+    except Exception as e:
+        logger.error("Failed to generate or save reflexion.", error=str(e), exc_info=True)
+
+
 @tracer.start_as_current_span("react_loop")
-def react_loop(prompt_data, context_manager, toolbox, client, llm_config):
+def react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config, thoughts_producer):
     """The main ReAct loop for processing a user request."""
     user_prompt = prompt_data.get("prompt")
     conversation_id = prompt_data.get("id") # Assuming prompt_id is the conversation_id
 
+    # Initialize the scratchpad for this loop
+    scratchpad = []
+    
     history = context_manager.get_history(conversation_id)
     
-    # --- Memory Retrieval Step ---
-    if not history: # Only search memory for the very first message
-        logger.info("New conversation, searching long-term memory...")
+    if not history: # Only perform these checks for the very first turn
+        # --- Automatic Reflexion Retrieval Step ---
+        logger.info("New conversation, checking for past reflexions...")
+        past_reflexion = context_manager.get_reflexion(user_prompt)
+        if past_reflexion:
+            reflexion_observation = f"System Directive: A previous attempt at a similar task failed. Heed this advice: {past_reflexion}"
+            history.append({"role": "system", "content": reflexion_observation})
+            scratchpad.append({"type": "reflexion", "content": reflexion_observation, "timestamp": time.time()})
+
+        # --- Memory Retrieval Step ---
+        logger.info("Searching long-term memory...")
         initial_memories = toolbox.execute_tool("search_memory", query=user_prompt)
-        # Prepend the conversation with the memory search result
-        history.append({"role": "system", "content": f"Tool Observation: {initial_memories}"})
+        memory_observation = f"Tool Observation: {initial_memories}"
+        history.append({"role": "system", "content": memory_observation})
+        scratchpad.append({"type": "observation", "content": memory_observation, "timestamp": time.time()})
 
     history.append({"role": "user", "content": user_prompt})
+    scratchpad.append({"type": "user_prompt", "content": user_prompt, "timestamp": time.time()})
 
     max_turns = 5
     for turn in range(max_turns):
         current_span = trace.get_current_span()
         current_span.set_attribute("react.turn", turn)
 
-        # 1. Build the prompt
-        full_prompt = history + [{"role": "system", "content": SYSTEM_PROMPT.format(tools=toolbox.get_tool_descriptions())}]
+        # 1. Build the prompt for QuantumPulse
+        full_prompt_messages = [QPChatMessage(**msg) for msg in history]
+        full_prompt_messages.append(QPChatMessage(role="system", content=SYSTEM_PROMPT.format(tools=toolbox.get_tool_descriptions())))
         
-        # 2. Call the LLM
-        completion = client.chat.completions.create(
-            model=llm_config['model'],
-            messages=full_prompt
-        )
-        response_text = completion.choices[0].message.content
+        # 2. Call QuantumPulse
+        request = QPChatRequest(model=llm_config['model'], messages=full_prompt_messages)
+        response = asyncio.run(qpulse_client.get_chat_completion(request))
+        response_text = response.choices[0].message.content
         history.append({"role": "assistant", "content": response_text})
 
-        # 3. Parse the response
+        # 3. Parse the response and STREAM THE THOUGHT
         try:
             thought = response_text.split("Action:")[0].replace("Thought:", "").strip()
+            
+            # --- Stream the thought to Pulsar ---
+            if thoughts_producer:
+                thought_message = {
+                    "conversation_id": conversation_id,
+                    "thought": thought,
+                    "timestamp": int(time.time() * 1000)
+                }
+                buf = io.BytesIO()
+                fastavro.writer(buf, THOUGHT_SCHEMA, [thought_message])
+                thoughts_producer.send_async(buf.getvalue(), callback=lambda res, msg_id: None)
+            # ------------------------------------
+
             action_str = response_text.split("Action:")[1].strip()
             action_json = json.loads(action_str)
             current_span.add_event("LLM Response Parsed", {"thought": thought, "action": json.dumps(action_json)})
+            scratchpad.append({"type": "thought", "content": thought, "timestamp": time.time()})
+            scratchpad.append({"type": "action", "content": action_json, "timestamp": time.time()})
         except (IndexError, json.JSONDecodeError) as e:
             logger.error("Could not parse LLM response", response=response_text, error=str(e))
+            scratchpad.append({"type": "error", "content": "Could not parse LLM response.", "timestamp": time.time()})
+            context_manager.append_to_history(conversation_id, history, scratchpad)
+            
+            # --- Reflexion Step on Failure ---
+            generate_and_save_reflexion(user_prompt, scratchpad, context_manager, qpulse_client, llm_config)
+            
             return "Error: Could not parse my own action. I will try again."
 
         # 4. Execute the action
@@ -201,69 +292,172 @@ def react_loop(prompt_data, context_manager, toolbox, client, llm_config):
                 summarization_prompt = "Based on our conversation, please provide a concise, one-paragraph summary of the key facts, findings, and conclusions. This summary will be saved to your long-term memory. Focus on information that is likely to be useful in the future."
                 
                 # Use the existing history, but add the summarization request
-                summary_request_history = history + [{"role": "system", "content": summarization_prompt}]
-                
-                summary_completion = client.chat.completions.create(
-                    model=llm_config['model'],
-                    messages=summary_request_history
-                )
-                summary_text = summary_completion.choices[0].message.content
+                summary_request_history = [QPChatMessage(**msg) for msg in history]
+                summary_request_history.append(QPChatMessage(role="system", content=summarization_prompt))
+
+                summary_request = QPChatRequest(model=llm_config['model'], messages=summary_request_history)
+                summary_response = asyncio.run(qpulse_client.get_chat_completion(summary_request))
+                summary_text = summary_response.choices[0].message.content
                 
                 if summary_text:
                     logger.info("Saving conversation summary to memory.", summary=summary_text)
-                    # This is a synchronous call, but it's acceptable for now.
-                    # In a high-throughput system, this could be offloaded to a background task.
                     toolbox.execute_tool("save_memory", summary=summary_text)
             except Exception as e:
                 logger.error("Failed to generate and save conversation summary.", error=str(e), exc_info=True)
 
-            context_manager.append_to_history(conversation_id, history)
+            context_manager.append_to_history(conversation_id, history, scratchpad)
             return final_answer
         elif action_json.get("action") == "call_tool":
             tool_name = action_json.get("tool_name")
             parameters = action_json.get("parameters", {})
             logger.info("Executing tool", tool_name=tool_name, parameters=parameters)
-            observation = toolbox.execute_tool(tool_name, **parameters)
-            history.append({"role": "system", "content": f"Tool Observation: {observation}"})
+            observation = toolbox.execute_tool(tool_name, context_manager=context_manager, **parameters)
+            observation_text = f"Tool Observation: {observation}"
+            history.append({"role": "system", "content": observation_text})
+            scratchpad.append({"type": "observation", "content": observation_text, "timestamp": time.time()})
         else:
-            history.append({"role": "system", "content": "Error: Invalid action specified."})
+            observation_text = "Error: Invalid action specified."
+            history.append({"role": "system", "content": observation_text})
+            scratchpad.append({"type": "error", "content": observation_text, "timestamp": time.time()})
 
-    context_manager.append_to_history(conversation_id, history)
+    logger.warning("Reached max turns without a final answer.", conversation_id=conversation_id)
+    scratchpad.append({"type": "error", "content": "Reached max turns.", "timestamp": time.time()})
+    context_manager.append_to_history(conversation_id, history, scratchpad)
+
+    # --- Reflexion Step on Failure ---
+    generate_and_save_reflexion(user_prompt, scratchpad, context_manager, qpulse_client, llm_config)
+
     return "Error: Reached maximum turns without a final answer."
+
+# --- Agent Setup ---
+
+def setup_default_agent(config: dict):
+    """Sets up the toolbox and context for the default agent."""
+    logger.info("Setting up default agent...")
+    toolbox = Toolbox()
+    
+    services_config = config.get('services', {})
+
+    # Pass the service URLs to the tools that need them
+    toolbox.register_tool(Tool(
+        name=vectorstore_tool.name,
+        description=vectorstore_tool.description,
+        func=vectorstore_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(human_tool) # Does not require config
+    toolbox.register_tool(Tool(
+        name=integrationhub_tool.name,
+        description=integrationhub_tool.description,
+        func=integrationhub_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(Tool(
+        name=knowledgegraph_tool.name,
+        description=knowledgegraph_tool.description,
+        func=knowledgegraph_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(Tool(
+        name=summarize_activity_tool.name,
+        description=summarize_activity_tool.description,
+        func=summarize_activity_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(Tool(
+        name=find_experts_tool.name,
+        description=find_experts_tool.description,
+        func=find_experts_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(Tool(
+        name=quantumpulse_tool.name,
+        description=quantumpulse_tool.description,
+        func=quantumpulse_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(Tool(
+        name=save_memory_tool.name,
+        description=save_memory_tool.description,
+        func=save_memory_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(Tool(
+        name=search_memory_tool.name,
+        description=search_memory_tool.description,
+        func=search_memory_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(github_tool) # Requires more specific config, handle later
+    toolbox.register_tool(generate_table_tool) # Does not require config
+    toolbox.register_tool(list_tools_tool)
+    toolbox.register_tool(Tool(
+        name=trigger_dag_tool.name,
+        description=trigger_dag_tool.description,
+        func=trigger_dag_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(Tool(
+        name=get_dag_status_tool.name,
+        description=get_dag_status_tool.description,
+        func=get_dag_status_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(Tool(
+        name=delegation_tool.name,
+        description=delegation_tool.description,
+        func=delegation_tool.func,
+        config=services_config
+    ))
+    toolbox.register_tool(Tool(
+        name=code_search_tool.name,
+        description=code_search_tool.description,
+        func=code_search_tool.func,
+        config=services_config
+    ))
+    return toolbox
 
 def run_agent():
     config = load_config()
     pulsar_config = config['pulsar']
     llm_config = config['llm']
     
-    # Run setup tasks
     setup_agent_memory()
 
-    agent_id = f"agentq-{uuid.uuid4()}"
-    task_topic = f"persistent://public/default/q.agentq.tasks.{agent_id}"
-    subscription_name = f"agentq-sub-{agent_id}"
+    # --- Personality Selection ---
+    personality = os.environ.get("AGENT_PERSONALITY", "default")
+    
+    if personality == "devops":
+        agent_id = DEVOPS_AGENT_ID
+        task_topic = DEVOPS_TASK_TOPIC
+        system_prompt = DEVOPS_SYSTEM_PROMPT
+        toolbox, context_manager = setup_devops_agent(config)
+    elif personality == "data_analyst":
+        agent_id = DA_AGENT_ID
+        task_topic = DA_TASK_TOPIC
+        system_prompt = DATA_ANALYST_SYSTEM_PROMPT
+        toolbox, context_manager = setup_data_analyst_agent(config)
+    elif personality == "knowledge_engineer":
+        agent_id = KE_AGENT_ID
+        task_topic = KE_TASK_TOPIC
+        system_prompt = KNOWLEDGE_ENGINEER_SYSTEM_PROMPT
+        toolbox, context_manager = setup_knowledge_engineer_agent(config)
+    else: # Default personality
+        agent_id = f"agentq-default-{uuid.uuid4()}"
+        task_topic = f"persistent://public/default/q.agentq.tasks.{agent_id}"
+        system_prompt = SYSTEM_PROMPT
+        toolbox = setup_default_agent(config)
+        context_manager = ContextManager(ignite_addresses=config['ignite']['addresses'], agent_id=agent_id)
+        context_manager.connect()
 
-    # Initialize components
-    context_manager = ContextManager(ignite_addresses=config['ignite']['addresses'], agent_id=agent_id)
-    toolbox = Toolbox()
-    toolbox.register_tool(vectorstore_tool)
-    toolbox.register_tool(human_tool)
-    toolbox.register_tool(integrationhub_tool)
-    toolbox.register_tool(knowledgegraph_tool)
-    toolbox.register_tool(summarize_activity_tool)
-    toolbox.register_tool(find_experts_tool)
-    toolbox.register_tool(quantumpulse_tool)
-    toolbox.register_tool(save_memory_tool)
-    toolbox.register_tool(search_memory_tool)
+    # The rest of the agent runs the same, regardless of personality
     
     pulsar_client = None
     try:
-        # Fetch secrets from Vault instead of environment variables
-        vault_client = VaultClient()
-        openai_api_key = vault_client.read_secret("secret/data/openai", "api_key")
-
+        # The agent no longer needs direct access to secrets.
+        # It interacts with other services that handle their own auth.
+        qpulse_client = QuantumPulseClient(base_url=config['qpulse_url'])
         pulsar_client = pulsar.Client(pulsar_config['service_url'])
-        openai_client = OpenAI(api_key=openai_api_key)
         context_manager.connect()
 
         # Producer for registration
@@ -276,12 +470,15 @@ def run_agent():
         
         # Producer for results
         result_producer = pulsar_client.create_producer(pulsar_config['results_topic'], schema=pulsar.schema.BytesSchema())
+        # Producer for thoughts
+        thoughts_producer = pulsar_client.create_producer(pulsar_config['thoughts_topic'], schema=pulsar.schema.BytesSchema())
         
         # This span will be the parent for all processing spans inside the loop
         with tracer.start_as_current_span("agent_main_loop") as parent_span:
             parent_span.set_attribute("agent.id", agent_id)
+            parent_span.set_attribute("agent.personality", personality)
             parent_span.set_attribute("agent.task_topic", task_topic)
-            logger.info("Agent running", agent_id=agent_id, topic=task_topic)
+            logger.info("Agent running", agent_id=agent_id, personality=personality, topic=task_topic)
 
             while running:
                 try:
@@ -292,19 +489,24 @@ def run_agent():
                         consumer.acknowledge(msg)
                         continue
 
-                    logger.info("Received task", task_id=prompt_data.get("id"))
-                    final_result = react_loop(prompt_data, context_manager, toolbox, openai_client, llm_config)
+                    logger.info("Received task", task_id=prompt_data.get("id"), workflow_id=prompt_data.get("workflow_id"))
+                    final_result = react_loop(prompt_data, context_manager, toolbox, qpulse_client, llm_config, thoughts_producer)
                     
                     # Publish the final result
                     result_message = {
-                        "id": prompt_data.get("id"), "result": final_result, 
-                        "llm_model": llm_config['model'], "prompt": prompt_data.get("prompt"),
-                        "timestamp": int(time.time() * 1000)
+                        "id": prompt_data.get("id"), 
+                        "result": final_result, 
+                        "llm_model": llm_config['model'], 
+                        "prompt": prompt_data.get("prompt"),
+                        "timestamp": int(time.time() * 1000),
+                        "workflow_id": prompt_data.get("workflow_id"),
+                        "task_id": prompt_data.get("task_id"),
+                        "agent_personality": personality
                     }
                     buf = io.BytesIO()
                     fastavro.writer(buf, RESULT_SCHEMA, [result_message])
                     result_producer.send(buf.getvalue())
-                    logger.info("Published result", task_id=prompt_data.get("id"))
+                    logger.info("Published result", task_id=prompt_data.get("id"), workflow_id=prompt_data.get("workflow_id"))
 
                     consumer.acknowledge(msg)
                 except pulsar.Timeout:
@@ -320,8 +522,14 @@ def run_agent():
     finally:
         if pulsar_client:
             pulsar_client.close()
+        shared_pulsar_client.close()
         context_manager.close()
         logger.info("Agent has shut down", agent_id=agent_id)
+
+def shutdown(signum, frame):
+    global running
+    logger.info("Shutdown signal received. Stopping agent gracefully...")
+    running = False
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, shutdown)

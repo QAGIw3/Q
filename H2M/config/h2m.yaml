@@ -29,6 +29,7 @@ pulsar:
     reply_prefix: "persistent://public/default/h2m-replies-"
     human_feedback_topic: "persistent://public/default/q.agentq.human_feedback"
     human_response_topic: "persistent://public/default/q.agentq.human_responses"
+    agent_thoughts_topic: "persistent://public/default/q.agentq.thoughts"
 
 # OpenTelemetry Configuration
 otel:

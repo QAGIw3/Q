@@ -1,0 +1,7 @@
+# Spark job dependencies
+pyspark==3.4.1
+
+# For connecting to MinIO (S3 compatible storage)
+# These are typically provided as packages to spark-submit
+# hadoop-aws
+# aws-java-sdk-bundle 

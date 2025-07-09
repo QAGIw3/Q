@@ -1,0 +1,21 @@
+# /managerQ/config/goals.yaml
+- goal_id: "goal_cpu_remediation"
+  objective: "Ensure no service exceeds 80% CPU utilization for a sustained period."
+  is_active: true
+  conditions:
+    - service: "*" # Wildcard for all services
+      metric: "cpu_utilization_percent"
+      operator: ">"
+      value: 80
+      duration_minutes: 5
+  # This workflow must be pre-loaded into the Ignite 'workflows' cache
+  remediation_workflow_id: "wf_auto_scale_service"
+
+# --- Pre-defined Remediation Workflows ---
+# This is a conceptual representation of a workflow that would be loaded into Ignite.
+# ID: wf_auto_scale_service
+# Tasks:
+#   - task_id: "task_1"
+#     agent_personality: "devops"
+#     prompt: "The service '{{ failed_condition.service }}' has breached its CPU threshold. Scale it up by one replica using the `increase_service_replicas` tool."
+#     dependencies: [] 

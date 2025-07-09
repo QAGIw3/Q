@@ -1,20 +1,11 @@
-# KnowledgeGraphQ/requirements.txt
+# Core application dependencies
 fastapi
 uvicorn[standard]
 pydantic
 gremlinpython==3.7.0
-
-# For document loading and chunking (in scripts)
-langchain
-sentence-transformers
-torch
-httpx
 structlog
- 
-# Shared Libraries
 pyyaml
--e ./shared/q_auth_parser
- 
-# Shared Libraries
-pyyaml
+
+# Shared Libraries (installed in editable mode)
+# These are required for the application to run.
 -e ./shared/q_auth_parser

@@ -1,73 +1,70 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 import logging
-import uuid
-import time
-
 from pydantic import BaseModel
-from managerQ.app.core.task_dispatcher import task_dispatcher
-from managerQ.app.core.result_listener import result_listener
 
+from managerQ.app.core.planner import planner
+from managerQ.app.core.workflow_manager import workflow_manager
+from managerQ.app.core.task_dispatcher import task_dispatcher
 from shared.q_auth_parser.parser import get_current_user
 from shared.q_auth_parser.models import UserClaims
 
-# Configure logging
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 class TaskRequest(BaseModel):
     prompt: str
-    model: str = "default"
 
-class TaskResponse(BaseModel):
-    task_id: str
-    agent_id: str
-    result: str
-    llm_model: str
+class WorkflowSubmitResponse(BaseModel):
+    workflow_id: str
+    status: str
+    num_tasks: int
 
-@router.post("", response_model=TaskResponse)
-async def submit_task(
+@router.post("", response_model=WorkflowSubmitResponse, status_code=status.HTTP_202_ACCEPTED)
+async def submit_task_and_create_workflow(
     request: TaskRequest,
     user: UserClaims = Depends(get_current_user)
 ):
     """
-    Submits a task to an available agent and waits for the result.
+    Accepts a user prompt, uses the Planner to create a workflow,
+    and then either dispatches it directly (for single-task workflows)
+    or saves it for the WorkflowExecutor to run.
     """
-    if not task_dispatcher or not result_listener:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="ManagerQ components are not initialized."
-        )
-
-    task_id = str(uuid.uuid4())
-    task_data = {
-        "id": task_id,
-        "prompt": request.prompt,
-        "model": request.model,
-        "timestamp": int(time.time() * 1000),
-        "user_id": user.user_id,
-        "username": user.username,
-    }
-
     try:
-        # 1. Dispatch the task to an available agent
-        agent_id = task_dispatcher.dispatch_task(task_data)
+        # 1. Use the Planner to decompose the prompt into a workflow
+        workflow = planner.create_plan(request.prompt)
         
-        # 2. Wait for the result to come back
-        result_data = await result_listener.get_result(task_id, timeout=60) # 60-second timeout
+        # 2. If it's a simple, single-task plan, dispatch it directly
+        if len(workflow.tasks) == 1 and not workflow.tasks[0].dependencies:
+            task = workflow.tasks[0]
+            logger.info("Dispatching single-task workflow directly.", workflow_id=workflow.workflow_id)
+            task_dispatcher.dispatch_task(
+                prompt=task.prompt,
+                agent_id=None, # Let the dispatcher find a suitable agent
+                task_id=task.task_id,
+                workflow_id=workflow.workflow_id
+            )
+            return WorkflowSubmitResponse(
+                workflow_id=workflow.workflow_id,
+                status="Dispatched as single task.",
+                num_tasks=1
+            )
 
-        return TaskResponse(
-            task_id=task_id,
-            agent_id=agent_id,
-            result=result_data.get("result"),
-            llm_model=result_data.get("llm_model")
-        )
+        # 3. For multi-step workflows, save them for the executor
+        else:
+            logger.info(f"Saving multi-step workflow '{workflow.workflow_id}' for asynchronous execution.")
+            workflow_manager.create_workflow(workflow)
+            return WorkflowSubmitResponse(
+                workflow_id=workflow.workflow_id,
+                status="Workflow accepted for execution.",
+                num_tasks=len(workflow.tasks)
+            )
 
-    except RuntimeError as e:
+    except ValueError as e: # From planner failure
+        logger.error(f"Planning failed for prompt '{request.prompt}': {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except RuntimeError as e: # From task dispatch failure
         logger.error(f"Task dispatch failed: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
-    except TimeoutError as e:
-        logger.error(f"Task timed out: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_408_REQUEST_TIMEOUT, detail=str(e))
     except Exception as e:
-        logger.error(f"An unexpected error occurred while processing task {task_id}: {e}", exc_info=True)
+        logger.error(f"An unexpected error occurred while creating workflow: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal error occurred.") 

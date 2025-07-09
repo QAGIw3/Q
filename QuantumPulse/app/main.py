@@ -3,7 +3,7 @@ import uvicorn
 import logging
 import structlog
 
-from app.api.endpoints import inference
+from app.api.endpoints import inference, fine_tuning, chat
 from app.core.pulsar_client import PulsarManager
 from app.core import pulsar_client as pulsar_manager_module
 from app.core.config import config
@@ -17,9 +17,9 @@ logger = structlog.get_logger(__name__)
 
 # --- FastAPI App ---
 app = FastAPI(
-    title=config.service_name,
-    version=config.version,
-    description="A next-generation service for distributed LLM inference pipelines."
+    title="QuantumPulse",
+    version="0.2.0",
+    description="A unified service for LLM inference, routing, and fine-tuning."
 )
 
 # Setup Prometheus metrics
@@ -57,8 +57,10 @@ def shutdown_event():
     if pulsar_manager_module.pulsar_manager:
         pulsar_manager_module.pulsar_manager.close()
 
-# Include the API router
-app.include_router(inference.router, prefix="/api", tags=["Inference"])
+# --- API Routers ---
+app.include_router(inference.router, prefix="/v1/inference", tags=["Inference"])
+app.include_router(fine_tuning.router, prefix="/v1/fine-tune", tags=["Fine-Tuning"])
+app.include_router(chat.router, prefix="/v1/chat", tags=["Chat"])
 
 @app.get("/health", tags=["Health"])
 def health_check():

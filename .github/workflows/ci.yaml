@@ -2,24 +2,31 @@
 #
 # Reusable CI workflow for Python-based microservices.
 
-name: Python CI
+name: Continuous Integration
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
 
 jobs:
-  build:
+  lint-and-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11"]
+        service:
+          - agentQ
+          - AuthQ
+          - H2M
+          - IntegrationHub
+          - KnowledgeGraphQ
+          - managerQ
+          - VectorStoreQ
+        python-version: [3.11]
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+    - uses: actions/checkout@v3
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
@@ -29,28 +36,16 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-      # This assumes each service has its own requirements.txt in its root.
-      # We may need to adjust the working-directory per service.
+        pip install ruff pytest
+        # Install service-specific dependencies
+        if [ -f ${{ matrix.service }}/requirements.txt ]; then pip install -r ${{ matrix.service }}/requirements.txt; fi
+        # Install dev dependencies if they exist
+        if [ -f ${{ matrix.service }}/requirements-dev.txt ]; then pip install -r ${{ matrix.service }}/requirements-dev.txt; fi
 
-    - name: Run Tests (Placeholder)
+    - name: Lint with ruff
       run: |
-        echo "No tests configured yet. Please add tests."
-        # pytest .
-        # The above line would be used if pytest is added.
+        ruff check ./${{ matrix.service }}
 
-    - name: Login to Harbor (Placeholder)
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    - name: Test with pytest
       run: |
-        echo "In a real workflow, you would log in to Harbor here."
-        # echo "${{ secrets.HARBOR_PASSWORD }}" | docker login harbor.your-domain.com -u "${{ secrets.HARBOR_USERNAME }}" --password-stdin
-
-    - name: Build and Push Docker Image (Placeholder)
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      run: |
-        TAG=$(date +%s)
-        IMAGE_NAME="harbor.your-domain.com/q-platform/service-name:${TAG}"
-        echo "Building and pushing Docker image: ${IMAGE_NAME}"
-        # docker build . -t ${IMAGE_NAME}
-        # docker push ${IMAGE_NAME}
-        # The service-name would need to be parameterized. 
+        pytest ./${{ matrix.service }}/tests 

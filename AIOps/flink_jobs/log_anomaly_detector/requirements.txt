@@ -1,0 +1,8 @@
+# Flink job dependencies
+apache-flink==1.17.1
+
+# For statistical calculations
+numpy==1.24.4
+
+# For persisting stats to Ignite
+pyignite==0.11.0 

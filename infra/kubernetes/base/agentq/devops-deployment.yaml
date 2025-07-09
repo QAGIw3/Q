@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentq-devops
+spec:
+  replicas: 1 # We only need one of this specialized agent
+  selector:
+    matchLabels:
+      app: agentq-devops
+  template:
+    metadata:
+      labels:
+        app: agentq-devops
+    spec:
+      containers:
+      - name: agentq
+        image: your-repo/agentq:latest # Replace with your image repository
+        env:
+        - name: AGENT_PERSONALITY
+          value: "devops"
+        - name: LOGS_TO_PULSAR
+          value: "true"
+        # Add other environment variables for secrets, Ignite, etc. 

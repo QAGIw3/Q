@@ -1,0 +1,32 @@
+apiVersion: "sparkoperator.k8s.io/v1beta2"
+kind: SparkApplication
+metadata:
+  name: h2m-feedback-processor
+  namespace: default
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: "your-repo/h2m-feedback-processor:latest" # Replace with your image repository
+  mainApplicationFile: local:///app/job.py
+  sparkVersion: "3.4.1"
+  restartPolicy:
+    type: OnFailure
+    onFailureRetries: 3
+    onFailureRetryInterval: 10
+    onSubmissionFailureRetries: 5
+    onSubmissionFailureRetryInterval: 20
+  driver:
+    cores: 1
+    memory: "1024m"
+    serviceAccount: spark
+  executor:
+    cores: 1
+    instances: 2
+    memory: "1024m"
+  # Add environment variables for Pulsar and MinIO connection details here
+  # env:
+  # - name: PULSAR_SERVICE_URL
+  #   value: "pulsar://pulsar.default.svc.cluster.local:6650"
+  # - name: MINIO_ENDPOINT
+  #   value: "http://minio.default.svc.cluster.local:9000" 

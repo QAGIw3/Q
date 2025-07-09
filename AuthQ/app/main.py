@@ -2,12 +2,15 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from keycloak import KeycloakOpenID
 import yaml
+import uvicorn
+import structlog
 
-app = FastAPI(
-    title="AuthQ Service",
-    description="Handles authentication and authorization for the Q Platform.",
-    version="0.1.0"
-)
+from shared.observability.logging_config import setup_logging
+from shared.observability.metrics import setup_metrics
+
+# --- Configuration & Logging ---
+setup_logging()
+logger = structlog.get_logger(__name__)
 
 # --- Configuration ---
 def load_config():
@@ -22,6 +25,13 @@ keycloak_openid = KeycloakOpenID(
     client_id=keycloak_config.get("client_id"),
     realm_name=keycloak_config.get("realm_name"),
     client_secret_key=keycloak_config.get("client_secret")
+)
+
+# --- FastAPI App ---
+app = FastAPI(
+    title="AuthQ",
+    description="Authentication and Authorization Service for the Q Platform.",
+    version="0.1.0"
 )
 
 # --- Pydantic Models ---
@@ -54,9 +64,10 @@ async def login_for_access_token(form_data: TokenRequest):
         )
 
 
-@app.get("/health", tags=["Status"])
-async def health_check():
-    """
-    Health check endpoint.
-    """
+@app.get("/health", tags=["Health"])
+def health_check():
+    """Simple health check endpoint."""
     return {"status": "ok"}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -12,7 +12,7 @@ MANAGERQ_URL = "http://localhost:8003" # The API for the agent manager
 
 # --- Tool Definition ---
 
-def delegate_to_quantumpulse(prompt: str) -> str:
+def delegate_to_quantumpulse(prompt: str, config: Dict[str, Any] = None) -> str:
     """
     Delegates a complex prompt, a "what-if" scenario, or a request for deep reasoning
     to the QuantumPulse inference service. Use this when a question is too complex
@@ -25,7 +25,11 @@ def delegate_to_quantumpulse(prompt: str) -> str:
         The final synthesized result from the QuantumPulse service.
     """
     try:
-        url = f"{MANAGERQ_URL}/v1/tasks"
+        manager_url = config.get("manager_url")
+        if not manager_url:
+            return "Error: manager_url not found in tool configuration."
+            
+        url = f"{manager_url}/v1/tasks"
         
         async def do_request():
             async with httpx.AsyncClient() as client:

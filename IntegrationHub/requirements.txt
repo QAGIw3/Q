@@ -11,6 +11,12 @@ zulip_bots
 emails
 
 # Utilities
+fastavro==1.9.4
+
+# Connectors
+PyGithub==2.3.0
+
+# Utilities
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-instrumentation-fastapi

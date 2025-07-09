@@ -1,0 +1,24 @@
+apiVersion: "sparkoperator.k8s.io/v1beta2"
+kind: SparkApplication
+metadata:
+  # The name will be dynamically set by the submit_spark_job tool
+  name: "log-pattern-analyzer-template"
+  namespace: "default"
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: "your-repo/aiops-log-pattern-analyzer:latest" # This image needs to be built
+  mainApplicationFile: "local:///app/job.py"
+  sparkVersion: "3.4.1"
+  restartPolicy:
+    type: Never
+  driver:
+    cores: 1
+    memory: "1g"
+    serviceAccount: spark
+  executor:
+    cores: 1
+    instances: 2
+    memory: "1g"
+  # Environment variables for MinIO can be passed via secrets 

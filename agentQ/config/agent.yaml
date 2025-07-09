@@ -6,15 +6,29 @@ pulsar:
   service_url: "pulsar://localhost:6650"
   
   # Topic for registering with managerQ
-  registration_topic: "q.managerq.registration"
+  registration_topic: "q.agentq.registrations"
   
   # Topic for publishing results (remains the same)
   results_topic: "q.agentq.results"
 
+  # Topic for streaming agent thoughts for real-time observability
+  thoughts_topic: "q.agentq.thoughts"
+
+# LLM config is now managed by QuantumPulse, but the agent might still need to know which model to request.
 llm:
-  provider: "openai"
-  model: "gpt-3.5-turbo"
+  model: "gpt-4-turbo" # The model to request from QuantumPulse
 
 ignite:
   addresses:
     - "127.0.0.1:10800"
+
+# Centralized URLs for platform services used by agent tools
+services:
+  manager_url: "http://localhost:8003"
+  knowledge_graph_url: "http://localhost:8083"
+  vector_store_url: "http://localhost:8001"
+  integration_hub_url: "http://localhost:8000" # This seems to point to qpulse, needs review
+  airflow_url: "http://localhost:8080"
+  # qpulse_url is now implicitly the integration_hub_url for some tools,
+  # but we should keep it for clarity for the QuantumPulseClient
+  qpulse_url: "http://localhost:8000"

@@ -1,0 +1,59 @@
+.dashboard-container {
+    display: flex;
+    height: calc(100vh - 60px); /* Full height minus nav bar */
+}
+
+.anomaly-list-panel {
+    width: 350px;
+    border-right: 1px solid #ccc;
+    padding: 15px;
+    overflow-y: auto;
+}
+
+.anomaly-list-panel h2 {
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+}
+
+.anomaly-list-panel ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+.anomaly-list-panel li {
+    padding: 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.anomaly-list-panel li:hover {
+    background-color: #f5f5f5;
+}
+
+.anomaly-list-panel li.selected {
+    background-color: #e7f3ff;
+    border-color: #007bff;
+}
+
+.anomaly-list-panel li strong {
+    font-size: 16px;
+}
+
+.anomaly-list-panel li p {
+    margin: 5px 0;
+    font-size: 14px;
+    color: #555;
+}
+
+.anomaly-list-panel li small {
+    color: #888;
+}
+
+.workflow-detail-panel {
+    flex-grow: 1;
+    padding: 20px;
+    overflow-y: auto;
+} 

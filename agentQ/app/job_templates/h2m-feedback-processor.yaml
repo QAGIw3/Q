@@ -1,0 +1,25 @@
+apiVersion: "sparkoperator.k8s.io/v1beta2"
+kind: SparkApplication
+metadata:
+  # The name will be dynamically set by the tool
+  name: "h2m-feedback-processor-template"
+  namespace: "default"
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: "your-repo/h2m-rlhf-fine-tuner:latest"
+  mainApplicationFile: "local:///app/job.py"
+  sparkVersion: "3.4.1"
+  restartPolicy:
+    type: Never
+  driver:
+    cores: 1
+    memory: "512m"
+    serviceAccount: spark
+  executor:
+    cores: 1
+    instances: 2
+    memory: "512m"
+  # Environment variables should be securely managed, e.g., via secrets in the k8s manifest
+  # or passed via arguments if the job script supports it. 

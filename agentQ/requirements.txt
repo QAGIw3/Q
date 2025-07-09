@@ -1,6 +1,5 @@
 # agentQ/requirements.txt
 apache-pulsar-client==3.5.0
-openai==1.14.3
 fastavro==1.9.4
 python-dotenv==1.0.1
 PyYAML==6.0.1
@@ -9,7 +8,6 @@ httpx
 
 # Observability
 structlog
-hvac
 
 # Graph
 gremlinpython==3.7.0
@@ -28,3 +26,9 @@ pyyaml
 -e ./shared/q_auth_parser
 -e ./shared/q_pulse_client
 -e ./shared/q_vectorstore_client
+-e ./shared/q_knowledgegraph_client
+-e ./shared/q_ui_schemas
+
+# For AIOps tools
+elasticsearch==8.11.0
+kubernetes==28.1.0

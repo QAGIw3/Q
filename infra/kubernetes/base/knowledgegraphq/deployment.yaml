@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knowledgegraphq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: knowledgegraphq
+  template:
+    metadata:
+      labels:
+        app: knowledgegraphq
+    spec:
+      containers:
+      - name: knowledgegraphq
+        image: your-repo/knowledgegraphq:latest # Replace with your image repository
+        ports:
+        - containerPort: 8000
+        env:
+        - name: LOGS_TO_PULSAR
+          value: "true"
+        # Add other environment variables for DB connections etc.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: knowledgegraphq
+spec:
+  selector:
+    app: knowledgegraphq
+  ports:
+  - protocol: TCP
+    port: 8000
+    targetPort: 8000 

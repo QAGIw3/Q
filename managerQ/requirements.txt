@@ -20,7 +20,9 @@ structlog
 # Shared Libraries
 pyyaml
 -e ./shared/q_auth_parser
+-e ./shared/q_pulse_client
  
 # Shared Libraries
 pyyaml
 -e ./shared/q_auth_parser
+-e ./shared/q_pulse_client

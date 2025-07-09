@@ -1,0 +1,29 @@
+apiVersion: "sparkoperator.k8s.io/v1beta2"
+kind: SparkApplication
+metadata:
+  name: "h2m-feedback-processor-{{ ds_nodash }}" # Use Airflow's execution date for a unique name
+  namespace: "default"
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: "your-repo/h2m-rlhf-fine-tuner:latest" # The image for the fine-tuning job
+  mainApplicationFile: "local:///app/job.py"
+  sparkVersion: "3.4.1"
+  restartPolicy:
+    type: Never # Airflow will handle retries
+  driver:
+    cores: 1
+    memory: "1024m"
+    serviceAccount: spark
+  executor:
+    cores: 1
+    instances: 2
+    memory: "1024m"
+  # Environment variables for Pulsar and MinIO can be passed from Airflow connections/variables
+  # env:
+  # - name: MINIO_ENDPOINT
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: minio-creds
+  #       key: endpoint 

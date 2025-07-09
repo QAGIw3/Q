@@ -29,6 +29,15 @@ class OtelConfig(BaseModel):
     enabled: bool
     endpoint: Optional[str]
 
+class PulsarTopics(BaseModel):
+    reply_prefix: str
+    human_response_topic: str
+    human_feedback_topic: str
+    agent_thoughts_topic: str
+
+class PulsarConfig(BaseModel):
+    service_url: str
+
 class AppConfig(BaseModel):
     """The main configuration model for the H2M service."""
     service_name: str
@@ -38,6 +47,7 @@ class AppConfig(BaseModel):
     ignite: IgniteConfig
     rag: RagConfig
     otel: OtelConfig
+    pulsar: PulsarConfig
 
 # --- Configuration Loading ---
 

@@ -1,6 +1,13 @@
-import pytest
+from fastapi.testclient import TestClient
+from H2M.app.main import app
 
-def test_placeholder():
-    """A placeholder test to ensure the test suite runs."""
-    assert True
+client = TestClient(app)
+
+def test_health_check():
+    """
+    Tests that the /health endpoint returns a 200 OK response.
+    """
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
 

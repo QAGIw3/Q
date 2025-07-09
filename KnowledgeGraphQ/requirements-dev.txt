@@ -1,0 +1,8 @@
+# For development and batch ingestion scripts
+langchain
+sentence-transformers
+torch
+httpx
+-e ../shared/q_auth_parser
+-e ../shared/q_vectorstore_client
+-e ../shared/q_pulse_client 

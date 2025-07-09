@@ -12,7 +12,7 @@ INTEGRATION_HUB_URL = "http://localhost:8000" # Port for IntegrationHub
 
 # --- Tool Definition ---
 
-def trigger_integration_flow(flow_id: str, parameters: Dict[str, Any] = None) -> str:
+def trigger_integration_flow(flow_id: str, parameters: Dict[str, Any] = None, config: Dict[str, Any] = None) -> str:
     """
     Triggers a pre-defined flow in the IntegrationHub.
     Use this to perform actions in external systems like sending emails,
@@ -26,7 +26,11 @@ def trigger_integration_flow(flow_id: str, parameters: Dict[str, Any] = None) ->
         A confirmation message indicating success or failure.
     """
     try:
-        url = f"{INTEGRATION_HUB_URL}/flows/{flow_id}/trigger"
+        integration_hub_url = config.get("integration_hub_url")
+        if not integration_hub_url:
+            return "Error: integration_hub_url not found in tool configuration."
+
+        url = f"{integration_hub_url}/flows/{flow_id}/trigger"
         
         # httpx is async, so we need to run it in an event loop
         async def do_request():

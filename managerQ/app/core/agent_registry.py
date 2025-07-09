@@ -5,10 +5,18 @@ import threading
 import time
 from typing import Dict, Optional, List
 import random
+import io
+import fastavro
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# This should match the schema in agentQ
+REGISTRATION_SCHEMA = fastavro.parse_schema({
+    "namespace": "q.managerq", "type": "record", "name": "AgentRegistration",
+    "fields": [{"name": "agent_id", "type": "string"}, {"name": "task_topic", "type": "string"}]
+})
 
 class AgentRegistry:
     """
@@ -62,23 +70,20 @@ class AgentRegistry:
         while self._running:
             try:
                 msg = self._consumer.receive(timeout_millis=1000)
-                reg_data = json.loads(msg.data().decode('utf-8'))
-                agent_id = reg_data.get("agent_id")
+                bytes_reader = io.BytesIO(msg.data())
+                reg_data = next(fastavro.reader(bytes_reader, REGISTRATION_SCHEMA), None)
                 
-                if not agent_id:
+                if not reg_data or not reg_data.get("agent_id"):
                     self._consumer.acknowledge(msg)
                     continue
+                
+                agent_id = reg_data.get("agent_id")
 
                 with self._lock:
-                    if reg_data.get("status") == "register":
-                        self._active_agents[agent_id] = reg_data
-                        self._agent_ids = list(self._active_agents.keys())
-                        logger.info(f"Registered agent: {agent_id}")
-                    elif reg_data.get("status") == "unregister":
-                        if agent_id in self._active_agents:
-                            del self._active_agents[agent_id]
-                            self._agent_ids = list(self._active_agents.keys())
-                            logger.info(f"Unregistered agent: {agent_id}")
+                    # For now, we only handle registration. A real system would handle heartbeats/unregistration.
+                    self._active_agents[agent_id] = reg_data
+                    self._agent_ids = list(self._active_agents.keys())
+                    logger.info(f"Registered agent: {agent_id}")
                 
                 self._consumer.acknowledge(msg)
             except pulsar.Timeout:
@@ -100,6 +105,25 @@ class AgentRegistry:
             
             agent_id = random.choice(self._agent_ids)
             return self._active_agents.get(agent_id)
+
+    def get_agent_by_id(self, agent_id: str) -> Optional[Dict]:
+        """Gets a specific agent by its full ID."""
+        with self._lock:
+            return self._active_agents.get(agent_id)
+
+    def find_agent_by_prefix(self, prefix: str) -> Optional[Dict]:
+        """Finds the first available agent whose ID starts with a given prefix."""
+        with self._lock:
+            if not self._agent_ids:
+                return None
+            
+            for agent_id in self._agent_ids:
+                if agent_id.startswith(prefix):
+                    logger.info(f"Found agent '{agent_id}' with prefix '{prefix}'")
+                    return self._active_agents.get(agent_id)
+            
+            logger.warning(f"No agent found with prefix '{prefix}'")
+            return None
 
 # Global instance
 # This will be initialized in the main app startup event

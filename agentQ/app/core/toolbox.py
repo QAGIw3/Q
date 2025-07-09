@@ -1,15 +1,22 @@
 import logging
 import json
-from typing import Dict, Callable, List
+from typing import Dict, Callable, Any
+
+# Forward declaration for type hinting
+class ContextManager:
+    pass
 
 logger = logging.getLogger(__name__)
 
 class Tool:
-    """A simple container for a tool's function and its description."""
-    def __init__(self, name: str, description: str, func: Callable):
+    """A container for a tool's function, its description, and context requirement."""
+    def __init__(self, name: str, description: str, func: Callable, requires_context: bool = False, requires_toolbox: bool = False, config: Dict[str, Any] = None):
         self.name = name
         self.description = description
         self.func = func
+        self.requires_context = requires_context
+        self.requires_toolbox = requires_toolbox
+        self.config = config or {}
 
 class Toolbox:
     """A registry and executor for agent tools."""
@@ -35,20 +42,30 @@ class Toolbox:
             descriptions.append(f"- {name}: {tool.description}")
         return "\n".join(descriptions)
 
-    def execute_tool(self, tool_name: str, **kwargs) -> str:
+    def execute_tool(self, tool_name: str, context_manager: ContextManager = None, **kwargs) -> str:
         """
         Executes a tool by name with the given arguments.
-        
-        Returns:
-            A string representation of the tool's output (observation).
+        If the tool requires context, the context_manager must be provided.
         """
         if tool_name not in self._tools:
             return f"Error: Tool '{tool_name}' not found."
         
+        tool = self._tools[tool_name]
+        
         try:
-            tool = self._tools[tool_name]
-            # In a real system, you would inspect the tool's function signature
-            # to pass the correct arguments. Here we pass all kwargs.
+            # Pass the tool's config to the function
+            kwargs['config'] = tool.config
+
+            # If the tool requires context, inject it into the kwargs
+            if tool.requires_context:
+                if not context_manager:
+                    raise ValueError(f"Tool '{tool_name}' requires context, but no ContextManager was provided.")
+                kwargs['context_manager'] = context_manager
+            
+            # If the tool requires the toolbox itself (for introspection)
+            if tool.requires_toolbox:
+                kwargs['toolbox'] = self
+
             result = tool.func(**kwargs)
             # The result must be a string to be included in the next prompt
             return json.dumps(result) if not isinstance(result, str) else result

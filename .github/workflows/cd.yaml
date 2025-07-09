@@ -1,0 +1,80 @@
+name: Continuous Deployment
+
+on:
+  workflow_dispatch: # Allows manual triggering
+  # To trigger automatically after CI, uncomment the following:
+  # workflow_run:
+  #   workflows: ["Continuous Integration"]
+  #   types:
+  #     - completed
+  #   branches:
+  #     - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push services
+      run: |
+        SERVICES="agentQ H2M IntegrationHub KnowledgeGraphQ managerQ VectorStoreQ WebAppQ"
+        for service in $SERVICES; do
+          cd $service
+          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/q-platform/${service,,}:${{ github.sha }}
+          echo "Building and pushing $IMAGE_ID"
+          docker build . --tag $IMAGE_ID
+          docker push $IMAGE_ID
+          cd ..
+        done
+
+    - name: Build and push jobs
+      run: |
+        # Example for one Flink job
+        cd KnowledgeGraphQ/flink_jobs/platform_event_processor
+        IMAGE_ID=ghcr.io/${{ github.repository_owner }}/q-platform/kg-platform-event-processor:${{ github.sha }}
+        docker build . --tag $IMAGE_ID
+        docker push $IMAGE_ID
+        cd ../../../
+
+        # Example for one Spark job
+        cd H2M/spark_jobs/feedback_processor
+        IMAGE_ID=ghcr.io/${{ github.repository_owner }}/q-platform/h2m-feedback-processor:${{ github.sha }}
+        docker build . --tag $IMAGE_ID
+        docker push $IMAGE_ID
+        cd ../../../
+
+    - name: Set up Kustomize
+      uses: imranismail/setup-kustomize@v2
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+
+    - name: Deploy to Kubernetes
+      env:
+        KUBECONFIG: ${{ secrets.KUBECONFIG }}
+      run: |
+        echo "Updating image tags with Kustomize..."
+        cd infra/kubernetes/base
+        kustomize edit set image your-repo/agentq=ghcr.io/${{ github.repository_owner }}/q-platform/agentq:${{ github.sha }}
+        kustomize edit set image your-repo/knowledgegraphq=ghcr.io/${{ github.repository_owner }}/q-platform/knowledgegraphq:${{ github.sha }}
+        # ... add kustomize edit set image for all other images ...
+        
+        echo "Applying manifests to cluster..."
+        kustomize build . | kubectl apply -f - 

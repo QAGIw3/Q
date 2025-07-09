@@ -60,6 +60,16 @@
     border-bottom-left-radius: 4px;
 }
 
+.message.thought {
+    background-color: #fffbe6; /* A light yellow background */
+    color: #5d5d5d;
+    align-self: flex-start;
+    border: 1px dashed #d4b106;
+    font-style: italic;
+    font-size: 0.9em;
+    max-width: 80%;
+}
+
 .input-area {
     display: flex;
     padding: 10px;
@@ -94,4 +104,39 @@
 .input-area button:disabled {
     background-color: #a0a0a0;
     cursor: not-allowed;
+}
+
+.message-text {
+    margin-right: 10px; /* Space between text and buttons */
+    flex-grow: 1;
+}
+
+.feedback-buttons {
+    display: flex;
+    gap: 5px;
+}
+
+.feedback-buttons button {
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 14px;
+    transition: background-color 0.2s, transform 0.2s;
+}
+
+.feedback-buttons button:hover:not(:disabled) {
+    background-color: #e0e0e0;
+    transform: scale(1.1);
+}
+
+.feedback-buttons button:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.feedback-buttons button.selected {
+    border-color: #007bff;
+    background-color: #cce5ff;
 }

@@ -14,10 +14,14 @@ api:
 pulsar:
   service_url: "pulsar://localhost:6650"
   topics:
-    registration: "persistent://public/default/q.agentq.registrations"
+    registration: "persistent://public/default/q.managerq.registrations"
     results: "persistent://public/default/q.agentq.results"
+    platform_events: "persistent://public/default/platform-events"
     # The task topic prefix is used to construct the full topic name for each agent
     task_prefix: "persistent://public/default/q.agentq.tasks."
+
+# URL for the centralized inference service
+qpulse_url: "http://localhost:8000"
 
 # OpenTelemetry Configuration
 otel:

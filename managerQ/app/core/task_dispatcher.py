@@ -3,6 +3,9 @@ import pulsar
 import fastavro
 import io
 from typing import Dict, Any, Optional
+import uuid
+from datetime import datetime
+from collections import defaultdict
 
 from managerQ.app.core.agent_registry import agent_registry
 
@@ -12,25 +15,31 @@ logger = logging.getLogger(__name__)
 
 # Avro schema for the prompt messages, must match agentQ's schema
 PROMPT_SCHEMA = fastavro.parse_schema({
-    "namespace": "q.h2m", "type": "record", "name": "PromptMessage",
+    "namespace": "q.managerq", "type": "record", "name": "PromptMessage",
     "fields": [
         {"name": "id", "type": "string"},
         {"name": "prompt", "type": "string"},
-        {"name": "model", "type": "string"}, # Can be used to request a specific model type
-        {"name": "timestamp", "type": "long"}
+        {"name": "model", "type": "string"},
+        {"name": "timestamp", "type": "long"},
+        # New fields for workflow context
+        {"name": "workflow_id", "type": ["null", "string"], "default": None},
+        {"name": "task_id", "type": ["null", "string"], "default": None},
     ]
 })
 
 class TaskDispatcher:
     """
-    Dispatches tasks to available agentQ workers.
+    Selects agents and dispatches tasks via Pulsar.
+    Also tracks pending tasks for different personalities.
     """
 
-    def __init__(self, service_url: str):
+    def __init__(self, service_url: str, task_topic_prefix: str):
         self._service_url = service_url
+        self._task_topic_prefix = task_topic_prefix
         self._client: Optional[pulsar.Client] = None
-        # Cache producers for each agent's task topic
         self._producers: Dict[str, pulsar.Producer] = {}
+        # A dictionary to track the number of pending tasks per agent personality
+        self.pending_tasks: Dict[str, int] = defaultdict(int)
 
     def start(self):
         """Initializes the Pulsar client."""
@@ -55,40 +64,71 @@ class TaskDispatcher:
             )
         return self._producers[topic]
 
-    def dispatch_task(self, task_data: Dict[str, Any]) -> str:
+    def dispatch_task(
+        self,
+        prompt: str,
+        agent_id: Optional[str] = None,
+        agent_personality: Optional[str] = None,
+        task_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        model: str = "default"
+    ) -> str:
         """
-        Selects an agent and dispatches a task to it.
-        
-        Args:
-            task_data: A dictionary representing the task to be sent.
-            
-        Returns:
-            The agent_id that the task was dispatched to.
-            
-        Raises:
-            RuntimeError: If no agents are available.
+        Selects an agent and dispatches a task.
+        An agent can be selected by specific ID or by personality.
         """
         if not agent_registry:
             raise RuntimeError("AgentRegistry not initialized.")
 
-        agent = agent_registry.get_agent()
+        agent = None
+        if agent_id:
+            agent = agent_registry.get_agent_by_id(agent_id)
+        elif agent_personality:
+            agent = agent_registry.find_agent_by_prefix(agent_personality)
+        
         if not agent:
-            raise RuntimeError("No available agents to dispatch task.")
+            raise RuntimeError(f"No available agent found for dispatch. Requested ID: {agent_id}, Personality: {agent_personality}")
 
-        agent_id = agent["agent_id"]
+        final_agent_id = agent["agent_id"]
         task_topic = agent["task_topic"]
         
-        logger.info(f"Dispatching task {task_data['id']} to agent {agent_id} on topic {task_topic}")
+        message_id = task_id or str(uuid.uuid4())
+
+        task_data = {
+            "id": message_id,
+            "prompt": prompt,
+            "model": model,
+            "timestamp": int(datetime.now().timestamp() * 1000),
+            "workflow_id": workflow_id,
+            "task_id": task_id
+        }
+        
+        logger.info(
+            "Dispatching task to agent", 
+            task_id=message_id, 
+            agent_id=final_agent_id, 
+            workflow_id=workflow_id
+        )
 
         try:
             producer = self._get_producer(task_topic)
             buf = io.BytesIO()
             fastavro.writer(buf, PROMPT_SCHEMA, [task_data])
             producer.send(buf.getvalue())
-            return agent_id
+            self.pending_tasks[agent_personality] += 1
+            logger.info(f"Dispatched task {task_id} to agent {final_agent_id}. Pending tasks for '{agent_personality}': {self.pending_tasks[agent_personality]}")
+
+            return final_agent_id
         except Exception as e:
-            logger.error(f"Failed to dispatch task to agent {agent_id}: {e}", exc_info=True)
+            logger.error(f"Failed to dispatch task to agent {final_agent_id}: {e}", exc_info=True)
             raise
+
+    def decrement_pending_tasks(self, agent_personality: str):
+        """Decrements the pending task count for a given personality."""
+        if self.pending_tasks[agent_personality] > 0:
+            self.pending_tasks[agent_personality] -= 1
+        logger.info(f"Completed task for '{agent_personality}'. Pending tasks: {self.pending_tasks[agent_personality]}")
+
 
 # Global instance
 task_dispatcher: Optional[TaskDispatcher] = None 

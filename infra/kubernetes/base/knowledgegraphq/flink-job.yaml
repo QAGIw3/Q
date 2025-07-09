@@ -1,0 +1,24 @@
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: platform-event-processor
+spec:
+  image: your-repo/kg-platform-event-processor:latest # Replace with your image repository
+  flinkVersion: v1_17
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "2"
+  serviceAccount: flink
+  jobManager:
+    resource:
+      memory: "1024m"
+      cpu: 1
+  taskManager:
+    resource:
+      memory: "1024m"
+      cpu: 1
+  job:
+    jarURI: local:///opt/flink/job.py # This assumes the job is python
+    entryClass: "org.apache.flink.client.python.PythonDriver"
+    args: []
+    parallelism: 2
+    upgradeMode: stateless 

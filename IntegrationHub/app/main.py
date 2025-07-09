@@ -1,15 +1,19 @@
 from fastapi import FastAPI
 import uvicorn
 import structlog
+import os
 
 from app.api import connectors, credentials, flows, webhooks
 from app.core.engine import engine
 from app.core.config import config
+from app.core.pulsar_client import close_pulsar_producers
 from shared.observability.logging_config import setup_logging
 from shared.observability.metrics import setup_metrics
+from shared.pulsar_client import shared_pulsar_client
 
 # --- Logging and Metrics Setup ---
-setup_logging()
+# Pass the service name to enable Pulsar log streaming if configured
+setup_logging(service_name="IntegrationHub")
 logger = structlog.get_logger(__name__)
 
 # --- FastAPI App ---
@@ -31,7 +35,8 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("IntegrationHub shutting down...")
-    # Clean up any resources here.
+    close_pulsar_producers()
+    shared_pulsar_client.close() # Close the shared client as well
     pass
 
 # --- API Routers ---

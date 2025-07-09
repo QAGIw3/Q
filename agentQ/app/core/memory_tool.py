@@ -1,5 +1,7 @@
 import logging
 import uuid
+import asyncio
+from typing import Dict, Any
 
 from shared.q_pulse_client.client import QuantumPulseClient
 from shared.q_vectorstore_client.client import VectorStoreClient
@@ -16,11 +18,11 @@ MEMORY_COLLECTION = "agent_memory"
 
 # --- Clients ---
 # In a real app, these would be managed more robustly (e.g., with dependency injection)
-qpulse_client = QuantumPulseClient(base_url=QPULSE_API_URL)
-vectorstore_client = VectorStoreClient(base_url=VECTORSTORE_API_URL)
+# qpulse_client = QuantumPulseClient(base_url=QPULSE_API_URL)
+# vectorstore_client = VectorStoreClient(base_url=VECTORSTORE_API_URL)
 
 
-def save_memory(summary: str) -> str:
+def save_memory(summary: str, config: Dict[str, Any] = None) -> str:
     """
     Saves a summary of a conversation to the agent's long-term memory.
     This involves creating a vector embedding of the summary and storing both
@@ -33,11 +35,14 @@ def save_memory(summary: str) -> str:
         A confirmation string indicating whether the memory was saved successfully.
     """
     try:
+        qpulse_client = QuantumPulseClient(base_url=config.get("qpulse_url"))
+        vectorstore_client = VectorStoreClient(base_url=config.get("vector_store_url"))
+
         logger.info(f"Attempting to save memory: '{summary}'")
         
         # 1. Get embedding from QuantumPulse
         # Using a generic sentence embedding model
-        embedding = qpulse_client.get_embedding("sentence-transformer", summary)
+        embedding = asyncio.run(qpulse_client.get_embedding("sentence-transformer", summary))
         
         # 2. Prepare vector for VectorStoreQ
         memory_id = str(uuid.uuid4())
@@ -48,10 +53,10 @@ def save_memory(summary: str) -> str:
         )
         
         # 3. Upsert into VectorStoreQ
-        vectorstore_client.upsert(
+        asyncio.run(vectorstore_client.upsert(
             collection_name=MEMORY_COLLECTION,
             vectors=[vector_to_upsert]
-        )
+        ))
         
         logger.info(f"Successfully saved memory with ID: {memory_id}")
         return f"Memory saved successfully with ID: {memory_id}."
@@ -65,10 +70,11 @@ def save_memory(summary: str) -> str:
 save_memory_tool = Tool(
     name="save_memory",
     description="Saves a textual summary of a conversation to the agent's long-term memory. Use this at the end of a conversation to remember key facts.",
-    func=save_memory
+    func=save_memory,
+    requires_context=False
 )
 
-def search_memory(query: str, top_k: int = 3) -> str:
+def search_memory(query: str, top_k: int = 3, config: Dict[str, Any] = None) -> str:
     """
     Searches the agent's long-term memory for relevant information.
     This is useful for recalling facts from past conversations. It finds the
@@ -82,17 +88,20 @@ def search_memory(query: str, top_k: int = 3) -> str:
         A string containing the most relevant memories found.
     """
     try:
+        qpulse_client = QuantumPulseClient(base_url=config.get("qpulse_url"))
+        vectorstore_client = VectorStoreClient(base_url=config.get("vector_store_url"))
+
         logger.info(f"Searching memory for: '{query}'")
         
         # 1. Get embedding for the query
-        query_embedding = qpulse_client.get_embedding("sentence-transformer", query)
+        query_embedding = asyncio.run(qpulse_client.get_embedding("sentence-transformer", query))
         
         # 2. Search in VectorStoreQ
-        search_results = vectorstore_client.search(
+        search_results = asyncio.run(vectorstore_client.search(
             collection_name=MEMORY_COLLECTION,
             queries=[query_embedding],
             top_k=top_k
-        )
+        ))
         
         # The result is a list of lists. We want the first list.
         if not search_results or not search_results[0]:
@@ -116,5 +125,6 @@ def search_memory(query: str, top_k: int = 3) -> str:
 search_memory_tool = Tool(
     name="search_memory",
     description="Searches the agent's long-term memory to find information from past conversations that is relevant to the current query.",
-    func=search_memory
+    func=search_memory,
+    requires_context=False
 )

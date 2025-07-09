@@ -13,7 +13,7 @@ KNOWLEDGE_GRAPH_URL = "http://localhost:8083" # Assuming KG service runs on this
 
 # --- Tool Definition ---
 
-def query_knowledge_graph(gremlin_query: str) -> str:
+def query_knowledge_graph(gremlin_query: str, config: Dict[str, Any] = None) -> str:
     """
     Executes a Gremlin query against the platform's knowledge graph.
     Use this to find relationships between entities, discover structured information,
@@ -26,7 +26,11 @@ def query_knowledge_graph(gremlin_query: str) -> str:
         A string containing the JSON-formatted query result, or an error message.
     """
     try:
-        url = f"{KNOWLEDGE_GRAPH_URL}/query"
+        knowledge_graph_url = config.get("knowledge_graph_url")
+        if not knowledge_graph_url:
+            return "Error: knowledge_graph_url not found in tool configuration."
+
+        url = f"{knowledge_graph_url}/query"
         
         async def do_request():
             async with httpx.AsyncClient() as client:
@@ -48,7 +52,7 @@ def query_knowledge_graph(gremlin_query: str) -> str:
         return f"Error: An unexpected error occurred: {e}"
 
 
-def summarize_stream_activity(stream_name: str, hours_ago: int = 24) -> str:
+def summarize_stream_activity(stream_name: str, hours_ago: int = 24, config: Dict[str, Any] = None) -> str:
     """
     Summarizes recent activity in a specific Zulip stream within a given time window.
     Provides the total number of messages and the top 5 most active users.
@@ -79,13 +83,13 @@ def summarize_stream_activity(stream_name: str, hours_ago: int = 24) -> str:
     """
     
     # We re-use the generic query function to execute this complex query
-    result = query_knowledge_graph(query)
+    result = query_knowledge_graph(query, config=config)
     
     # The agent can parse this structured string to answer the user
     return f"Activity summary for stream '{stream_name}' in the last {hours_ago} hours: {result}"
 
 
-def find_experts_on_topic(topic: str) -> str:
+def find_experts_on_topic(topic: str, config: Dict[str, Any] = None) -> str:
     """
     Identifies users who have talked the most about a specific topic.
     It searches message content for the topic string and returns the top 5 most frequent posters.
@@ -107,7 +111,7 @@ def find_experts_on_topic(topic: str) -> str:
         .limit(local, 5)
     """
     
-    result = query_knowledge_graph(query)
+    result = query_knowledge_graph(query, config=config)
     
     return f"Top experts on the topic '{topic}': {result}"
 

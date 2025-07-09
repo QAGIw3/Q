@@ -4,8 +4,12 @@ import fastavro
 import io
 import threading
 import time
+import asyncio
 from typing import Dict, Any, Optional
-from concurrent.futures import Future
+
+from managerQ.app.core.workflow_manager import workflow_manager
+from managerQ.app.core.task_dispatcher import task_dispatcher
+from managerQ.app.models import TaskStatus
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -15,15 +19,22 @@ logger = logging.getLogger(__name__)
 RESULT_SCHEMA = fastavro.parse_schema({
     "namespace": "q.agentq", "type": "record", "name": "ResultMessage",
     "fields": [
-        {"name": "id", "type": "string"}, {"name": "result", "type": "string"},
-        {"name": "llm_model", "type": "string"}, {"name": "prompt", "type": "string"},
-        {"name": "timestamp", "type": "long"}
+        {"name": "id", "type": "string"},
+        {"name": "result", "type": "string"},
+        {"name": "llm_model", "type": "string"},
+        {"name": "prompt", "type": "string"},
+        {"name": "timestamp", "type": "long"},
+        # New fields for workflow context
+        {"name": "workflow_id", "type": ["null", "string"], "default": None},
+        {"name": "task_id", "type": ["null", "string"], "default": None},
+        {"name": "agent_personality", "type": ["null", "string"], "default": None},
     ]
 })
 
 class ResultListener:
     """
-    Listens for results from agentQ workers on a shared topic.
+    Listens for results from agentQ workers.
+    It can update workflow state or fulfill a future for a delegated task.
     """
 
     def __init__(self, service_url: str, results_topic: str):
@@ -31,13 +42,19 @@ class ResultListener:
         self._results_topic = results_topic
         self._client: Optional[pulsar.Client] = None
         self._consumer: Optional[pulsar.Consumer] = None
-        
-        # In-memory store for pending futures, waiting for results
-        self._pending_futures: Dict[str, Future] = {}
-        self._lock = threading.Lock()
-        
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        # For handling delegated tasks synchronously
+        self._futures: Dict[str, asyncio.Future] = {}
+
+    def add_future(self, task_id: str, future: asyncio.Future):
+        """Adds a future to the listener's tracking dictionary."""
+        self._futures[task_id] = future
+
+    def remove_future(self, task_id: str):
+        """Removes a future from the dictionary, typically after completion or timeout."""
+        if task_id in self._futures:
+            del self._futures[task_id]
 
     def start(self):
         """Starts the result listener in a background thread."""
@@ -48,7 +65,7 @@ class ResultListener:
         self._consumer = self._client.subscribe(
             self._results_topic,
             subscription_name="managerq-results-sub",
-            subscription_type=pulsar.SubscriptionType.Shared # Multiple manager instances could listen
+            subscription_type=pulsar.SubscriptionType.Shared
         )
         
         self._running = True
@@ -72,39 +89,62 @@ class ResultListener:
                 msg = self._consumer.receive(timeout_millis=1000)
                 bytes_reader = io.BytesIO(msg.data())
                 result_data = next(fastavro.reader(bytes_reader, RESULT_SCHEMA), None)
-                task_id = result_data.get("id")
                 
-                with self._lock:
-                    if task_id in self._pending_futures:
-                        future = self._pending_futures.pop(task_id)
-                        future.set_result(result_data)
-                        logger.info(f"Received result for task: {task_id}")
+                self.handle_result(result_data)
                 
                 self._consumer.acknowledge(msg)
             except pulsar.Timeout:
                 continue
             except Exception as e:
                 logger.error(f"Error in ResultListener consumer loop: {e}", exc_info=True)
+                if 'msg' in locals():
+                    self._consumer.negative_acknowledge(msg)
                 time.sleep(5)
 
-    async def get_result(self, task_id: str, timeout: int = 30) -> Dict[str, Any]:
+    def handle_result(self, result_data: Dict[str, Any]):
         """
-        Asynchronously waits for and retrieves a result for a given task ID.
+        Processes a result message.
+        If it's for a delegated task, it fulfills the future.
+        If it's part of a workflow, it updates the workflow state.
         """
-        future = Future()
-        with self._lock:
-            self._pending_futures[task_id] = future
-        
-        logger.info(f"Waiting for result for task: {task_id}")
-        try:
-            # The future's result is set by the consumer thread
-            return future.result(timeout=timeout)
-        except TimeoutError:
-            with self._lock:
-                # Clean up the future if it timed out
-                if task_id in self._pending_futures:
-                    self._pending_futures.pop(task_id)
-            raise TimeoutError(f"Timed out waiting for result for task: {task_id}")
+        if not result_data:
+            return
+
+        task_id = result_data.get("task_id")
+        workflow_id = result_data.get("workflow_id")
+        result_text = result_data.get("result")
+        agent_personality = result_data.get("agent_personality")
+
+        # Decrement pending task count for the personality
+        if agent_personality:
+            task_dispatcher.decrement_pending_tasks(agent_personality)
+
+        # Check if this result corresponds to a delegated task waiting for a response
+        if task_id and task_id in self._futures:
+            future = self._futures[task_id]
+            if not future.done():
+                future.set_result(result_text)
+            logger.info(f"Fulfilled future for delegated task {task_id}.")
+            # We don't remove the future here; the calling endpoint is responsible for cleanup.
+            return # Stop processing, as this was a simple delegation
+
+        # If not a delegated task, check if it's part of a larger workflow
+        if workflow_id and task_id:
+            logger.info(
+                "Received result for workflow task", 
+                workflow_id=workflow_id, 
+                task_id=task_id
+            )
+            workflow_manager.update_task_status(
+                workflow_id=workflow_id,
+                task_id=task_id,
+                status=TaskStatus.COMPLETED,
+                result=result_text
+            )
+        else:
+            # This is a result for a simple, non-workflow task that wasn't delegated.
+            # We can log it or handle it differently if needed.
+            logger.info(f"Received standalone result for task: {result_data.get('id')}")
 
 # Global instance
 result_listener: Optional[ResultListener] = None 

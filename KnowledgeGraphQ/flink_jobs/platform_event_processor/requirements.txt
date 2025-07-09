@@ -1,0 +1,9 @@
+# Flink job dependencies
+apache-flink==1.17.1
+# The Pulsar connector is often bundled with Flink, but we specify it for clarity
+# For Flink 1.17, you typically use connectors built for Scala 2.12
+# We will assume the connector is available in the Flink classpath.
+# For local testing, you might need to download the JAR manually.
+
+# For making HTTP requests to the KnowledgeGraphQ API
+requests==2.31.0 

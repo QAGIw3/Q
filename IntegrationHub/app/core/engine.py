@@ -9,7 +9,13 @@ from app.connectors.zulip.zulip_connector import zulip_connector
 from app.connectors.smtp.email_connector import email_connector
 from app.connectors.pulsar.pulsar_connector import pulsar_publisher_connector
 from app.connectors.http.http_connector import http_connector
+from app.connectors.github.github_connector import github_connector
 from app.core.vault_client import vault_client
+
+# This is a bit of a hack, ideally the engine would have access
+# to a persistent flow store instead of importing from the API layer.
+from app.api.flows import PREDEFINED_FLOWS
+
 
 # A registry of all available connector instances
 AVAILABLE_CONNECTORS: Dict[str, Connector] = {
@@ -17,6 +23,7 @@ AVAILABLE_CONNECTORS: Dict[str, Connector] = {
     email_connector.connector_id: email_connector,
     pulsar_publisher_connector.connector_id: pulsar_publisher_connector,
     http_connector.connector_id: http_connector,
+    github_connector.connector_id: github_connector,
 }
 
 class FlowExecutionEngine:
@@ -100,6 +107,15 @@ class FlowExecutionEngine:
                 # In a real engine, we'd have error handling, retries, etc.
                 break # Stop flow on first failure
         self.logger.info(f"--- Flow Finished: {flow.get('name')} ---")
+
+    async def run_flow_by_id(self, flow_id: str, data_context: Dict[str, Any]):
+        """Finds a pre-defined flow by its ID and runs it."""
+        if flow_id not in PREDEFINED_FLOWS:
+            self.logger.error(f"Attempted to run non-existent flow with ID: {flow_id}")
+            raise ValueError(f"Flow with ID '{flow_id}' not found.")
+        
+        flow_config = PREDEFINED_FLOWS[flow_id]
+        await self.run_flow(flow_config, data_context)
 
 
 engine = FlowExecutionEngine() 

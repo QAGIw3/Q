@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from pydantic import BaseModel
 
 from app.core.engine import engine
+from app.core.pulsar_client import publish_event
 from shared.q_auth_parser.parser import get_current_user
 from shared.q_auth_parser.models import UserClaims
 
@@ -82,6 +83,65 @@ PREDEFINED_FLOWS: Dict[str, Dict[str, Any]] = {
                 }
             }
         ]
+    },
+    "post_comment_on_pr": {
+        "id": "post_comment_on_pr",
+        "name": "Post a Comment on a GitHub PR",
+        "description": "Uses the GitHub connector to post a comment on a specified pull request.",
+        "steps": [
+            {
+                "name": "Create PR Comment",
+                "connector_id": "github",
+                "action_id": "create_pull_request_comment",
+                "credential_id": "github-pat", # A credential containing the GitHub PAT
+                "configuration": {
+                    # These values will be provided by the flow trigger
+                    "repo": "{{ repo }}",
+                    "pr_number": "{{ pr_number }}",
+                    "body": "{{ body }}"
+                }
+            }
+        ]
+    },
+    "code_review_agent": {
+        "id": "code_review_agent",
+        "name": "Code Review Agent",
+        "description": "Triggered by a GitHub webhook on PR creation. Asks an agent to review the code changes and posts the feedback as a comment.",
+        "steps": [
+            {
+                "name": "Get PR Diff",
+                "connector_id": "github",
+                "action_id": "get_pr_diff",
+                "credential_id": "github-pat",
+                "configuration": {
+                    "repo": "{{ repo }}",
+                    "pr_number": "{{ pr_number }}"
+                }
+            },
+            {
+                "name": "Ask Agent for Review",
+                "connector_id": "http",
+                "credential_id": "managerq-service-token",
+                "configuration": {
+                    "method": "POST",
+                    "url": "http://managerq:8003/v1/tasks",
+                    "json": {
+                        "prompt": "You are a senior software engineer performing a code review. Please analyze the following diff and provide a high-level summary of the changes, identify potential issues, and offer constructive feedback. Structure your response in clear markdown format. Here is the diff:\n\n```diff\n{{ diff }}\n```"
+                    }
+                }
+            },
+            {
+                "name": "Post Review Comment to PR",
+                "connector_id": "github",
+                "action_id": "create_pull_request_comment",
+                "credential_id": "github-pat",
+                "configuration": {
+                    "repo": "{{ repo }}",
+                    "pr_number": "{{ pr_number }}",
+                    "body": "### AI Code Review\n\nHere is a summary of my review:\n\n{{ result }}"
+                }
+            }
+        ]
     }
 }
 
@@ -110,6 +170,17 @@ async def trigger_flow(
     if flow_id not in PREDEFINED_FLOWS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flow not found.")
     
+    # Publish an event about the trigger
+    await publish_event(
+        event_type="flow.triggered",
+        source="IntegrationHub",
+        payload={
+            "flow_id": flow_id,
+            "user": user.dict(),
+            "trigger_params": request.parameters
+        }
+    )
+
     flow_config = PREDEFINED_FLOWS[flow_id]
     
     # The new engine handles parameter mapping internally.
