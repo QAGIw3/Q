@@ -12,6 +12,7 @@ This Terraform setup will deploy and configure the following services into the `
 -   **Prometheus**: For collecting and querying time-series metrics.
 -   **Grafana**: For visualizing metrics and building dashboards.
 -   **ArgoCD**: For continuous, GitOps-based application deployment.
+-   **Vault**: For centralized secret management.
 -   **Istio Policies**: The necessary `RequestAuthentication` and `AuthorizationPolicy` resources to secure the service mesh.
 -   (Other core data services like Pulsar can also be managed here).
 
@@ -53,13 +54,13 @@ terraform apply -auto-approve
 
 This command will:
 -   Create the `q-platform` namespace if it doesn't exist.
--   Add the required Helm repositories (`bitnami`, `milvus`, `goharbor`, `prometheus-community`, `grafana`, `argo`).
--   Deploy Keycloak, Milvus, Harbor, Prometheus, Grafana, and ArgoCD using their respective configurations in the `values/` directory.
+-   Add the required Helm repositories (`bitnami`, `milvus`, `goharbor`, `prometheus-community`, `grafana`, `argo`, `hashicorp`).
+-   Deploy Keycloak, Milvus, Harbor, Prometheus, Grafana, ArgoCD, and Vault using their respective configurations in the `values/` directory.
 -   Apply the Istio security policies to your cluster.
 
 ## Post-Deployment
 
-After the `apply` command finishes, you can use `kubectl get pods --all-namespaces` to see the services starting up. You will also need to find the external IP addresses of the `LoadBalancer` services for Keycloak, Milvus, Harbor, Grafana, and the ArgoCD Server to access their UIs and APIs.
+After the `apply` command finishes, you can use `kubectl get pods --all-namespaces` to see the services starting up. You will also need to find the external IP addresses of the `LoadBalancer` services for Keycloak, Milvus, Harbor, Grafana, the ArgoCD Server, and Vault to access their UIs and APIs.
 
 ```bash
 kubectl get svc --all-namespaces
