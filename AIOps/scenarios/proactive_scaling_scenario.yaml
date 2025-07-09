@@ -1,0 +1,16 @@
+# AIOps/scenarios/proactive_scaling_scenario.yaml
+---
+event_type: "forecast.breach.predicted"
+source: "AIOpsForecaster"
+payload:
+  goal_id: "goal_maintain_service_performance"
+  goal_objective: "Ensure all services maintain adequate performance and resource allocation."
+  service_name: "QuantumPulse-Worker"
+  metric: "cpu_usage_percentage"
+  operator: ">"
+  threshold: 80.0
+  predicted_value: 85.5
+  prediction_timestamp: "2023-10-28T14:00:00Z"
+  message: "CPU usage for 'QuantumPulse-Worker' is predicted to exceed 80% in 2 hours."
+timestamp: "2023-10-28T12:00:00Z"
+event_id: "evt-forecast-67890" 

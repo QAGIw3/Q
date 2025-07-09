@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
-import ReactFlow, { addEdge, Connection, Edge, Node, Position } from 'reactflow';
+import ReactFlow, { addEdge, Connection, Edge, Node, Position, Handle } from 'reactflow';
 import 'reactflow/dist/style.css';
+import './WorkflowVisualizer.css';
 import { AuthContext } from '../../AuthContext';
 import dagre from 'dagre';
 
@@ -35,6 +36,83 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => 
   return { nodes, edges };
 };
 
+const workflowToElements = (workflow: any): { nodes: Node[], edges: Edge[] } => {
+    const nodes: Node[] = [];
+    const edges: Edge[] = [];
+    const workflowId = workflow.workflow_id;
+
+    const traverse = (tasks: any[], parentId?: string) => {
+        tasks.forEach(task => {
+            let nodeType = 'default';
+            if (task.type === 'approval') nodeType = 'approval';
+            if (task.type === 'conditional') nodeType = 'default';
+
+            nodes.push({
+                id: task.task_id,
+                data: { 
+                    label: `${task.type}: ${task.task_id.substring(0, 8)}`, 
+                    status: task.status,
+                    message: task.message, // For approval nodes
+                    workflowId: workflowId,
+                },
+                position: { x: 0, y: 0 },
+                type: nodeType,
+                className: `status-${task.status}`
+            });
+            if (parentId) {
+                edges.push({ id: `e-${parentId}-${task.task_id}`, source: parentId, target: task.task_id, animated: true });
+            }
+            if (task.dependencies && task.dependencies.length > 0) {
+                task.dependencies.forEach((dep: string) => {
+                    edges.push({ id: `e-${dep}-${task.task_id}`, source: dep, target: task.task_id });
+                });
+            }
+            if (task.type === 'conditional') {
+                task.branches.forEach((branch: any) => {
+                    traverse(branch.tasks, task.task_id);
+                });
+            }
+        });
+    };
+
+    traverse(workflow.tasks);
+    return { nodes, edges };
+};
+
+const ApprovalNode = ({ data }: { data: any }) => {
+    const handleApproval = async (approved: boolean) => {
+        const { workflowId, label } = data;
+        const taskId = label.split(': ')[1];
+        
+        // This is a simplified way to get the token. A better approach would be to use a context or a dedicated hook.
+        const token = localStorage.getItem('react-token'); 
+        
+        await fetch(`http://localhost:8001/api/v1/workflows/${workflowId}/tasks/${taskId}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ approved }),
+        });
+    };
+
+    return (
+        <div className="approval-node">
+            <Handle type="target" position={Position.Top} />
+            <div>{data.message}</div>
+            {data.status === 'pending_approval' && (
+                <div className="approval-buttons">
+                    <button onClick={() => handleApproval(true)}>Approve</button>
+                    <button onClick={() => handleApproval(false)}>Reject</button>
+                </div>
+            )}
+            <Handle type="source" position={Position.Bottom} />
+        </div>
+    );
+};
+
+const nodeTypes = {
+    approval: ApprovalNode,
+};
+
 
 const WorkflowVisualizer: React.FC<{ workflowId: string }> = ({ workflowId }) => {
     const [nodes, setNodes] = useState<Node[]>([]);
@@ -63,25 +141,31 @@ const WorkflowVisualizer: React.FC<{ workflowId: string }> = ({ workflowId }) =>
         return () => ws.close();
     }, [workflowId, authContext?.token]);
     
-    // Placeholder for fetching initial workflow structure
     useEffect(() => {
-        // In a real app, you would fetch the workflow structure here
-        // and then generate the initial nodes and edges.
-        const initialNodes: Node[] = [
-            // This would be generated from the workflow data
-        ];
-        const initialEdges: Edge[] = [
-            // This would be generated from the workflow dependencies
-        ];
+        if (!authContext?.token || !workflowId) return;
 
-        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-            initialNodes,
-            initialEdges
-        );
+        const fetchWorkflow = async () => {
+            try {
+                const response = await fetch(`http://localhost:8001/api/v1/workflows/${workflowId}`, {
+                    headers: { 'Authorization': `Bearer ${authContext.token}` }
+                });
+                if (!response.ok) throw new Error('Failed to fetch workflow');
+                const workflowData = await response.json();
+                
+                const { nodes: initialNodes, edges: initialEdges } = workflowToElements(workflowData);
+                const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+                    initialNodes,
+                    initialEdges
+                );
+                setNodes(layoutedNodes);
+                setEdges(layoutedEdges);
+            } catch (error) {
+                console.error("Error fetching workflow:", error);
+            }
+        };
 
-        setNodes(layoutedNodes);
-        setEdges(layoutedEdges);
-    }, [workflowId]);
+        fetchWorkflow();
+    }, [workflowId, authContext?.token]);
 
 
     const onConnect = (params: Connection | Edge) => setEdges((eds) => addEdge(params, eds));
@@ -93,6 +177,7 @@ const WorkflowVisualizer: React.FC<{ workflowId: string }> = ({ workflowId }) =>
                 edges={edges}
                 onConnect={onConnect}
                 fitView
+                nodeTypes={nodeTypes}
             >
             </ReactFlow>
         </div>

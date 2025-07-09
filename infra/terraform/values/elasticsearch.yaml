@@ -11,4 +11,15 @@ volumeClaimTemplate:
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
-      storage: 20Gi 
+      storage: 20Gi
+
+# Enable settings for vector search capabilities
+# The 'dense_vector' type is available in the default distribution,
+# but being explicit about settings is good practice.
+# No specific plugins are required for basic dense_vector support.
+cluster:
+  name: elasticsearch
+  env:
+    # Set any necessary environment variables for the cluster
+    # For example, discovery settings if needed.
+    discovery.type: "single-node" # For local development 

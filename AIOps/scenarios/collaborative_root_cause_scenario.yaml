@@ -1,0 +1,15 @@
+# AIOps/scenarios/collaborative_root_cause_scenario.yaml
+---
+event_type: "anomaly_detected"
+source: "prometheus"
+payload:
+  alert_name: "ServiceLatencyHigh"
+  service_name: "QuantumPulse-API"
+  severity: "warning"
+  message: "P95 latency for the 'QuantumPulse-API' is above the 500ms threshold."
+  details:
+    metric: "http_requests_latency_seconds_p95"
+    current_value: 0.75
+    threshold: 0.5
+timestamp: "2023-10-29T18:00:00Z"
+event_id: "evt-collab-11223" 

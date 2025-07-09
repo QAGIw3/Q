@@ -64,6 +64,8 @@ def startup_event():
     """Initializes and starts all background services."""
     logger.info("ManagerQ starting up...")
     
+    dashboard_ws.manager.startup()
+    
     global agent_registry_instance, task_dispatcher_instance, result_listener_instance
     event_listener_instance = None # Define instance variable
 
@@ -100,6 +102,7 @@ def startup_event():
 def shutdown_event():
     """Stops all background services gracefully."""
     logger.info("ManagerQ shutting down...")
+    dashboard_ws.manager.shutdown()
     agent_registry_instance.stop()
     task_dispatcher_instance.stop()
     result_listener_instance.stop()

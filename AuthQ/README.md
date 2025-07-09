@@ -55,10 +55,14 @@ async def get_my_data(claims: UserClaims = Depends(get_user_claims)):
     user_id = claims.sub
     user_email = claims.email
     
-    if "admin" in claims.realm_access.roles:
+    if claims.has_role("admin"):
         # Perform admin-only logic
         return {"message": f"Hello Admin {user_email}!"}
         
+    if claims.has_role("sre"):
+        # Perform SRE-only logic
+        return {"message": f"Hello SRE {user_email}!"}
+
     return {"message": f"Hello User {user_email}!"}
 ```
 
@@ -84,7 +88,7 @@ async def my_socket(
     user_id = claims.sub
     user_email = claims.email
     
-    if "admin" in claims.realm_access.roles:
+    if claims.has_role("admin"):
         # Perform admin-only logic
         await websocket.send_text(f"Hello Admin {user_email}!")
     else:
@@ -95,6 +99,25 @@ A client would connect with a URL like:
 `ws://<host>/ws/my-protected-socket?claims=<base64-encoded-claims>`
 
 ---
+
+## Keycloak Configuration
+
+To manage roles for the Q Platform, you will need to perform the following steps in your Keycloak admin console:
+
+1.  **Navigate to your Realm:** Select the realm you are using for the platform.
+2.  **Create Roles:**
+    - Go to `Roles` in the navigation menu.
+    - Click `Add Role`.
+    - Create the following roles:
+        - `admin`: For platform administrators with full access.
+        - `sre`: For Site Reliability Engineers who can approve infrastructure changes.
+        - `developer`: For developers who can interact with development tools.
+        - `data_scientist`: For data scientists who can run analysis jobs.
+        - `user`: The default role for all authenticated users.
+3.  **Assign Roles to Users/Groups:**
+    - Go to `Users` or `Groups`.
+    - Select a user or group.
+    - Go to the `Role Mappings` tab and assign the desired roles.
 
 ## Istio Configuration Examples
 

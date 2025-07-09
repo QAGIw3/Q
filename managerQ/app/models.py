@@ -8,6 +8,7 @@ class TaskStatus(str, Enum):
     DISPATCHED = "dispatched"
     COMPLETED = "completed"
     FAILED = "failed"
+    PENDING_APPROVAL = "pending_approval"
 
 class WorkflowTask(BaseModel):
     task_id: str = Field(default_factory=lambda: f"task_{uuid.uuid4()}")
@@ -33,8 +34,19 @@ class ConditionalBlock(BaseModel):
     dependencies: List[str] = Field(default_factory=list, description="List of task_ids that must be completed before this conditional block can be evaluated.")
     branches: List[ConditionalBranch]
 
+class ApprovalBlock(BaseModel):
+    """A block that pauses the workflow to wait for human approval."""
+    task_id: str = Field(default_factory=lambda: f"approve_{uuid.uuid4()}")
+    type: Literal["approval"] = "approval"
+    status: TaskStatus = TaskStatus.PENDING
+    dependencies: List[str] = Field(default_factory=list, description="List of task_ids that must be completed before this approval is requested.")
+    message: str = Field(description="The message to display to the user for approval, e.g., 'Do you approve this action?'")
+    required_role: Optional[str] = Field(None, description="The role required to approve this step, e.g., 'sre'.")
+    # 'result' will store the approval decision: 'approved' or 'rejected'
+    result: Optional[Literal['approved', 'rejected']] = None
+
 # A Union type representing any execution block in the workflow graph.
-TaskBlock = Union[WorkflowTask, ConditionalBlock]
+TaskBlock = Union[WorkflowTask, ConditionalBlock, ApprovalBlock]
 
 # Update Pydantic's forward references to handle the recursive TaskBlock definition.
 ConditionalBranch.update_forward_refs(TaskBlock=TaskBlock)
@@ -52,6 +64,7 @@ class Workflow(BaseModel):
     status: WorkflowStatus = WorkflowStatus.RUNNING
     tasks: List[TaskBlock]
     shared_context: Dict[str, Any] = Field(default_factory=dict, description="A shared dictionary for agents in this workflow to read/write intermediate results.")
+    event_id: Optional[str] = Field(None, description="The ID of the event that triggered this workflow.")
     
     def get_task(self, task_id: str) -> Optional[TaskBlock]:
         """Recursively finds a task or block by its ID."""

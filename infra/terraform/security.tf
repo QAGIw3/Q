@@ -80,26 +80,30 @@ resource "vault_kubernetes_auth_backend_config" "k8s_config" {
   # This requires proper RBAC permissions for the Vault service account.
 }
 
-# 3. Create a policy that grants read access to all secrets.
-# In a production scenario, you would create more granular policies per service.
-resource "vault_policy" "q_platform_services" {
-  name = "q-platform-services"
-  policy = <<-EOT
-    # Allow reading all secrets under the 'secret/' path
-    path "secret/data/*" {
-      capabilities = ["read"]
-    }
-  EOT
+# --- Service-Specific Vault Roles ---
+
+module "managerq_vault_role" {
+  source       = "./modules/vault-service-role"
+  service_name = "managerq"
+  namespace    = var.namespace
 }
 
-# 4. Create a role that binds Kubernetes Service Accounts to the Vault policy.
-# This role allows any service account in the 'q-platform' namespace to authenticate
-# with Vault and receive a token with the 'q-platform-services' policy.
-resource "vault_kubernetes_auth_backend_role" "q_platform_role" {
-  backend                          = vault_auth_backend.kubernetes.path
-  role_name                        = "q-platform-role"
-  bound_service_account_names      = ["*"] # Allow any service account
-  bound_service_account_namespaces = [var.namespace] # Restricted to our platform's namespace
-  token_policies                   = [vault_policy.q_platform_services.name]
-  token_ttl                        = 3600 # Tokens are valid for 1 hour
-} 
+module "agentq_vault_role" {
+  source       = "./modules/vault-service-role"
+  service_name = "agentq"
+  namespace    = var.namespace
+}
+
+module "integrationhub_vault_role" {
+  source       = "./modules/vault-service-role"
+  service_name = "integrationhub"
+  namespace    = var.namespace
+}
+
+module "knowledgegraphq_vault_role" {
+  source       = "./modules/vault-service-role"
+  service_name = "knowledgegraphq"
+  namespace    = var.namespace
+}
+
+# Add other service modules as needed... 

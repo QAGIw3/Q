@@ -2,10 +2,14 @@ import logging
 import json
 import pulsar
 import structlog
+import asyncio
 
 from managerQ.app.core.task_dispatcher import task_dispatcher
 from managerQ.app.core.agent_registry import agent_registry
 from managerQ.app.api.dashboard_ws import manager as dashboard_manager
+from managerQ.app.core.planner import planner, AmbiguousGoalError
+from managerQ.app.core.workflow_manager import workflow_manager
+from managerQ.app.models import Workflow, WorkflowStatus
 
 logger = structlog.get_logger(__name__)
 
@@ -72,39 +76,43 @@ class EventListener:
             logger.error("Failed to handle event message", error=str(e), exc_info=True)
 
     def handle_anomaly_event(self, event_data: dict):
-        """Handles an error rate anomaly event by dispatching a task and broadcasting to dashboards."""
+        """Handles an error rate anomaly event by creating a new investigation workflow."""
         payload = event_data.get("payload", {})
         service_name = payload.get("service_name")
+        event_id = event_data.get("event_id")
         
-        if not service_name:
-            logger.warning("Anomaly event received without a service_name", payload=payload)
+        if not service_name or not event_id:
+            logger.warning("Anomaly event received without a service_name or event_id", payload=payload)
             return
 
-        logger.info(f"Anomaly detected in '{service_name}'. Finding a DevOps agent to investigate.")
+        logger.info(f"Anomaly detected in '{service_name}'. Creating investigation workflow.", event_id=event_id)
         
         # Broadcast the raw anomaly event to any connected dashboards
-        dashboard_manager.broadcast({
+        asyncio.run(dashboard_manager.broadcast({
             "event_type": "anomaly_detected",
             "data": event_data
-        })
+        }))
         
-        # Find a registered DevOps agent
-        devops_agent = agent_registry.find_agent_by_prefix("devops-agent")
-        
-        if not devops_agent:
-            logger.error("No DevOps agent is currently registered. Cannot dispatch anomaly task.")
-            return
-
         prompt = (
-            f"An alert has been triggered for the service '{service_name}'. "
+            f"An automated alert has been triggered for the service '{service_name}'. "
             f"The service is experiencing an anomalous error rate. "
-            f"Payload: {json.dumps(payload)}. "
-            "Please investigate the root cause and propose a solution."
+            f"Payload: {json.dumps(payload, indent=2)}. "
+            "Your goal is to create a workflow to diagnose the root cause and propose a remediation plan."
         )
-        
-        task_dispatcher.dispatch_task(
-            agent_id=devops_agent['agent_id'],
-            prompt=prompt,
-            model="default" # The agent will use its configured model
-        )
-        logger.info(f"Dispatched anomaly investigation task to agent '{devops_agent['agent_id']}'.") 
+
+        try:
+            # Since this listener runs in a sync loop, we must use asyncio.run()
+            workflow = asyncio.run(planner.create_plan(prompt))
+            workflow.event_id = event_id # Associate the event with the workflow
+            workflow_manager.create_workflow(workflow)
+            logger.info(f"Created and saved new investigation workflow '{workflow.workflow_id}' for event '{event_id}'.")
+
+        except AmbiguousGoalError as e:
+            # This should ideally not happen for automated prompts. It indicates the prompt is poorly formulated.
+            logger.error(
+                "Planner found an auto-generated anomaly prompt to be ambiguous.",
+                prompt=prompt,
+                clarifying_question=e.clarifying_question
+            )
+        except Exception as e:
+            logger.error(f"Failed to create investigation workflow for event '{event_id}'", error=str(e), exc_info=True) 

@@ -1,0 +1,18 @@
+# AIOps/scenarios/service_unhealthy_scenario.yaml
+---
+event_type: "anomaly_detected"
+source: "prometheus"
+payload:
+  alert_name: "HighErrorRate"
+  service_name: "WebAppQ"
+  severity: "critical"
+  message: "The 'WebAppQ' service is experiencing a high error rate (95%) on the checkout endpoint."
+  # In a real scenario, this would contain much more detail, like specific metrics,
+  # affected pods, etc.
+  details:
+    metric: "http_requests_error_rate_total"
+    endpoint: "/api/v1/checkout"
+    current_value: 0.95
+    threshold: 0.10
+timestamp: "2023-10-27T10:00:00Z"
+event_id: "evt-prometheus-12345" 

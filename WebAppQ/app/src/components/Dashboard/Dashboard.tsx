@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import { AuthContext } from '../../AuthContext';
 import './Dashboard.css';
 import WorkflowVisualizer from '../WorkflowVisualizer/WorkflowVisualizer';
+import { useSearchParams } from 'react-router-dom';
 
 interface Anomaly {
     id: string;
@@ -26,19 +27,45 @@ interface WorkflowTask {
 export const Dashboard: React.FC = () => {
     const [anomalies, setAnomalies] = useState<Record<string, Anomaly>>({});
     const [selectedAnomalyId, setSelectedAnomalyId] = useState<string | null>(null);
+    const [connectionStatus, setConnectionStatus] = useState<'CONNECTING' | 'OPEN' | 'CLOSING' | 'CLOSED' | 'RECONNECTING'>('CONNECTING');
     const authContext = useContext(AuthContext);
+    const [searchParams] = useSearchParams();
+    const ws = useRef<WebSocket | null>(null);
+    const reconnectInterval = useRef<NodeJS.Timeout | null>(null);
 
-    useEffect(() => {
-        if (!authContext || !authContext.token) return;
+    const connect = () => {
+        if (!authContext?.token) return;
 
-        const wsUrl = `ws://localhost:8004/v1/dashboard/ws`; // managerQ runs on 8004
-        const ws = new WebSocket(wsUrl);
+        const wsUrl = `ws://localhost:8001/v1/dashboard/ws`; // Corrected port
+        ws.current = new WebSocket(wsUrl);
+        setConnectionStatus('CONNECTING');
 
-        ws.onopen = () => console.log("Dashboard WebSocket connected");
-        ws.onclose = () => console.log("Dashboard WebSocket disconnected");
-        ws.onerror = (err) => console.error("Dashboard WebSocket error:", err);
+        ws.current.onopen = () => {
+            console.log("Dashboard WebSocket connected");
+            setConnectionStatus('OPEN');
+            if (reconnectInterval.current) {
+                clearInterval(reconnectInterval.current);
+                reconnectInterval.current = null;
+            }
+        };
 
-        ws.onmessage = (event) => {
+        ws.current.onclose = () => {
+            console.log("Dashboard WebSocket disconnected");
+            setConnectionStatus('CLOSED');
+            if (!reconnectInterval.current) {
+                reconnectInterval.current = setInterval(() => {
+                    setConnectionStatus('RECONNECTING');
+                    connect();
+                }, 5000);
+            }
+        };
+
+        ws.current.onerror = (err) => {
+            console.error("Dashboard WebSocket error:", err);
+            ws.current?.close();
+        };
+
+        ws.current.onmessage = (event) => {
             const message = JSON.parse(event.data);
             
             if (message.event_type === 'anomaly_detected') {
@@ -61,14 +88,34 @@ export const Dashboard: React.FC = () => {
                 // This part would need to be improved in a real system.
             }
         };
+    };
 
-        return () => ws.close();
+    useEffect(() => {
+        const workflowIdFromUrl = searchParams.get('workflow_id');
+        if (workflowIdFromUrl) {
+            // Find the anomaly that has this workflow_id
+            const anomaly = Object.values(anomalies).find(a => a.workflow_id === workflowIdFromUrl);
+            if (anomaly) {
+                setSelectedAnomalyId(anomaly.id);
+            }
+        }
+    }, [searchParams, anomalies]);
+
+    useEffect(() => {
+        connect();
+        return () => {
+            if (reconnectInterval.current) clearInterval(reconnectInterval.current);
+            ws.current?.close();
+        };
     }, [authContext]);
 
     const selectedAnomaly = selectedAnomalyId ? anomalies[selectedAnomalyId] : null;
 
     return (
         <div className="dashboard-container">
+            <div className={`connection-status ${connectionStatus.toLowerCase()}`}>
+                Dashboard Status: {connectionStatus}
+            </div>
             <div className="anomaly-list-panel">
                 <h2>Active Anomalies</h2>
                 <ul>

@@ -113,6 +113,7 @@ The workflow contains a `shared_context` dictionary for passing data and a `task
 
 **Agent-Specific Tooling Notes:**
 - The `devops` agent has access to tools like `list_kubernetes_pods`, `get_service_logs`, `restart_service`, and `rollback_deployment`. When generating a plan for DevOps tasks, prefer creating tasks that use these specific tools.
+- The `data_analyst` agent can use `execute_sql_query` to query databases and `generate_visualization` to create charts. Delegate data-intensive questions to it.
 
 **Example of a Conditional Workflow:**
 Request: "Try to optimize the database query. If it's successful, re-deploy the service. If it fails, revert the changes and notify the database admin."
@@ -176,41 +177,39 @@ class Planner:
             # 1. Embed the user's prompt
             prompt_embedding = embedding_model.encode(user_prompt).tolist()
 
-            # 2. Formulate a vector search query for the Gremlin endpoint
+            # 2. Formulate a vector search query for the Gremlin endpoint.
             # This query finds the top_k Insight vertices closest to the prompt's embedding.
-            # Note: This assumes the KnowledgeGraphQ service supports vector search via Gremlin,
-            # which might require a specific backend like Elasticsearch or a custom plugin.
+            # This assumes the JanusGraph instance is configured with an indexing backend
+            # that supports vector search, like Elasticsearch. The query syntax might vary
+            # based on the specific indexing plugin used (e.g., janusgraph-es-geoshape).
+            # The query below is a conceptual representation.
             query = f"""
-            g.V().hasLabel('Insight').as('i')
-              .order().by(map(values('embedding')).map(l -> l.stream().mapToDouble(d -> d.doubleValue()).toArray()), 
-                          T.closeTo, {json.dumps(prompt_embedding)})
-              .limit({top_k})
-              .select('i')
-              .values('lesson')
+            g.V().hasLabel('Insight')
+                 .has('embedding')
+                 .order()
+                 .by(__.map(values('embedding')).map(l -> 점.l.stream().mapToDouble(d -> d.doubleValue()).toArray()), 
+                     T.closeTo, {json.dumps(prompt_embedding)})
+                 .limit({top_k})
+                 .values('lesson')
             """
             
-            # For this example, let's mock the behavior since the query is complex
-            # and depends on a specific KG backend setup.
-            # In a real system, you would execute this query:
-            # response = await kgq_client.execute_gremlin_query(query)
-            # insights = response.get("result", [])
+            # Execute the query against the KnowledgeGraphQ service
+            response = await kgq_client.execute_gremlin_query(query)
             
-            # Mocked response for demonstration:
-            logger.warning("Knowledge graph insight query is mocked for this version.")
-            mock_insights = [
-                "When a service deployment fails, always check the logs of the service that failed to start, not just the deployment tool's logs.",
-                "Analyzing user feedback requires NLP sentiment analysis, not just keyword counting."
-            ]
-            
-            insights = mock_insights[:top_k]
-            
+            # Assuming the client returns a list of results under a 'data' key
+            # and handles the raw response parsing.
+            insights = response.get("data", [])
+
             if insights:
-                logger.info("Found relevant insights", count=len(insights), insights=insights)
+                logger.info(f"Found {len(insights)} relevant insights from the knowledge graph.")
+            else:
+                logger.info("No relevant insights found in the knowledge graph for this prompt.")
             return insights
 
         except Exception as e:
             logger.error(f"Failed to retrieve insights from knowledge graph: {e}", exc_info=True)
-            # Do not fail the whole planning process if insight retrieval fails
+            # Do not fail the whole planning process if insight retrieval fails.
+            # Returning an empty list is a safe fallback.
             return []
 
 

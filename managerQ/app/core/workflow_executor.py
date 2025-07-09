@@ -8,9 +8,11 @@ import json
 from managerQ.app.core.workflow_manager import workflow_manager
 from managerQ.app.core.agent_registry import agent_registry
 from managerQ.app.core.task_dispatcher import task_dispatcher
-from managerQ.app.models import TaskStatus, WorkflowStatus, Workflow, TaskBlock, WorkflowTask, ConditionalBlock, WorkflowEvent
+from managerQ.app.models import TaskStatus, WorkflowStatus, Workflow, TaskBlock, WorkflowTask, ConditionalBlock, ApprovalBlock, WorkflowEvent
 from managerQ.app.api.dashboard_ws import broadcast_workflow_event
 import asyncio
+import pulsar
+from managerQ.app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,9 @@ class WorkflowExecutor:
         self.poll_interval = poll_interval
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._pulsar_client: pulsar.Client = None
+        self._task_producer: pulsar.Producer = None
+        self._conditional_producer: pulsar.Producer = None
         # Initialize Jinja2 environment for condition evaluation
         self._jinja_env = jinja2.Environment()
 
@@ -33,6 +38,10 @@ class WorkflowExecutor:
             logger.warning("WorkflowExecutor is already running.")
             return
             
+        self._pulsar_client = pulsar.Client(settings.pulsar.service_url)
+        self._task_producer = self._pulsar_client.create_producer(settings.pulsar.topics.tasks_dispatch)
+        self._conditional_producer = self._pulsar_client.create_producer(settings.pulsar.topics.tasks_conditional)
+
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
@@ -43,6 +52,12 @@ class WorkflowExecutor:
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join()
+        if self._task_producer:
+            self._task_producer.close()
+        if self._conditional_producer:
+            self._conditional_producer.close()
+        if self._pulsar_client:
+            self._pulsar_client.close()
         logger.info("WorkflowExecutor stopped.")
 
     def _run_loop(self):
@@ -134,87 +149,78 @@ class WorkflowExecutor:
             
             elif isinstance(block, ConditionalBlock):
                 self._evaluate_conditional(block, workflow)
+            
+            elif isinstance(block, ApprovalBlock):
+                self._handle_approval_block(block, workflow)
+
+    def _handle_approval_block(self, block: ApprovalBlock, workflow: Workflow):
+        """Handles a workflow block that requires human approval."""
+        logger.info(f"Pausing workflow '{workflow.workflow_id}' for human approval on task '{block.task_id}'.")
+        
+        # Update the task's status to indicate it's waiting for a decision.
+        # The workflow will not proceed down this path until an external API call
+        # changes this status to 'COMPLETED' (approved) or 'FAILED' (rejected).
+        workflow_manager.update_task_status(workflow.workflow_id, block.task_id, TaskStatus.PENDING_APPROVAL)
+        
+        # Broadcast the event so the UI can update
+        asyncio.run(broadcast_workflow_event(WorkflowEvent(
+            event_type="APPROVAL_REQUIRED",
+            workflow_id=workflow.workflow_id,
+            task_id=block.task_id,
+            data={"message": block.message}
+        )))
 
     def _dispatch_task(self, task: WorkflowTask, workflow: Workflow):
         """Renders a task's prompt and dispatches it to an agent."""
-        logger.info(f"Dispatching task '{task.task_id}' for workflow '{workflow.workflow_id}'.")
-        agent = agent_registry.find_agent_by_prefix(task.agent_personality)
-        if not agent:
-            logger.warning(f"No agent for personality '{task.agent_personality}'. Task '{task.task_id}' deferred.")
-            return
-
+        logger.info(f"Dispatching task '{task.task_id}' for workflow '{workflow.workflow_id}' to Pulsar.")
+        
         try:
             # Render prompt using Jinja2 and the workflow's shared context
             template = self._jinja_env.from_string(task.prompt)
             rendered_prompt = template.render(workflow.shared_context)
+            
+            task_payload = {
+                "task_id": task.task_id,
+                "workflow_id": workflow.workflow_id,
+                "agent_personality": task.agent_personality,
+                "prompt": rendered_prompt,
+            }
+            
+            self._task_producer.send(json.dumps(task_payload).encode('utf-8'))
+            
+            workflow_manager.update_task_status(workflow.workflow_id, task.task_id, TaskStatus.DISPATCHED)
+            
+            # Broadcast dispatch event
+            asyncio.run(broadcast_workflow_event(WorkflowEvent(
+                event_type="TASK_STATUS_UPDATE",
+                workflow_id=workflow.workflow_id,
+                task_id=task.task_id,
+                data={"status": TaskStatus.DISPATCHED.value}
+            )))
+
         except jinja2.TemplateError as e:
             logger.error(f"Failed to render prompt for task '{task.task_id}': {e}", exc_info=True)
-            # Mark task as failed
             workflow_manager.update_task_status(workflow.workflow_id, task.task_id, TaskStatus.FAILED, result=f"Prompt rendering failed: {e}")
-            return
-            
-        task_dispatcher.dispatch_task(
-            agent_id=agent['agent_id'],
-            prompt=rendered_prompt,
-            task_id=task.task_id,
-            workflow_id=workflow.workflow_id
-        )
-        
-        workflow_manager.update_task_status(workflow.workflow_id, task.task_id, TaskStatus.DISPATCHED)
-        
-        # Broadcast dispatch event
-        asyncio.run(broadcast_workflow_event(WorkflowEvent(
-            event_type="TASK_STATUS_UPDATE",
-            workflow_id=workflow.workflow_id,
-            task_id=task.task_id,
-            data={"status": TaskStatus.DISPATCHED.value}
-        )))
+        except Exception as e:
+            logger.error(f"Failed to publish task '{task.task_id}' to Pulsar: {e}", exc_info=True)
+            # Optionally, set the task to FAILED here as well
+            workflow_manager.update_task_status(workflow.workflow_id, task.task_id, TaskStatus.FAILED, result="Failed to publish to message queue.")
+
 
     def _evaluate_conditional(self, block: ConditionalBlock, workflow: Workflow):
-        """Evaluates the branches of a conditional block."""
-        logger.debug(f"Evaluating conditional block '{block.task_id}' in workflow '{workflow.workflow_id}'.")
+        """Publishes a conditional evaluation task to Pulsar."""
+        logger.info(f"Publishing conditional evaluation for block '{block.task_id}' to Pulsar.")
         
-        # Once a conditional's dependencies are met, we evaluate its branches.
-        # The block's status will be updated to COMPLETED if a branch is taken,
-        # or if no branch condition is met.
-
-        for branch in block.branches:
-            try:
-                template = self._jinja_env.from_string(branch.condition)
-                context = self._get_evaluation_context(workflow)
-                
-                if template.render(context).lower() in ['true', '1', 'yes']:
-                    logger.info(f"Condition '{branch.condition}' for block '{block.task_id}' evaluated to True. Processing branch.")
-                    # Mark the conditional block itself as completed *before* processing the new branch
-                    workflow_manager.update_task_status(workflow.workflow_id, block.task_id, TaskStatus.COMPLETED)
-                    
-                    # Broadcast evaluation event
-                    asyncio.run(broadcast_workflow_event(WorkflowEvent(
-                        event_type="CONDITIONAL_EVALUATED",
-                        workflow_id=workflow.workflow_id,
-                        task_id=block.task_id,
-                        data={"condition": branch.condition, "result": True}
-                    )))
-
-                    # Recursively process the tasks in the chosen branch
-                    self._process_blocks(branch.tasks, workflow)
-                    return # Exit after finding the first true branch
-            except jinja2.TemplateError as e:
-                logger.error(f"Failed to evaluate condition '{branch.condition}' for block '{block.task_id}': {e}", exc_info=True)
-                workflow_manager.update_task_status(workflow.workflow_id, block.task_id, TaskStatus.FAILED, result=f"Condition rendering failed: {e}")
-                return # Stop processing this conditional if a condition is malformed
-
-        # If no branch was taken, the conditional is considered complete.
-        logger.debug(f"No conditions met for conditional block '{block.task_id}'. Marking as complete.")
-        workflow_manager.update_task_status(workflow.workflow_id, block.task_id, TaskStatus.COMPLETED)
+        conditional_payload = {
+            "block_id": block.task_id,
+            "workflow_id": workflow.workflow_id,
+        }
         
-        # Broadcast evaluation event for no branch taken
-        asyncio.run(broadcast_workflow_event(WorkflowEvent(
-            event_type="CONDITIONAL_EVALUATED",
-            workflow_id=workflow.workflow_id,
-            task_id=block.task_id,
-            data={"condition": "None", "result": False}
-        )))
+        self._conditional_producer.send(json.dumps(conditional_payload).encode('utf-8'))
+        
+        # We don't mark as complete here anymore. The worker will do that.
+        # We can, however, mark it as "evaluating" if we add such a status.
+        # For now, we'll leave it as PENDING until the worker picks it up.
 
     def _get_evaluation_context(self, workflow: Workflow) -> dict:
         """

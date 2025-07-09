@@ -1,0 +1,19 @@
+pulsar-client
+pyyaml
+structlog
+fastavro
+pyignite
+jinja2
+sentence-transformers
+# Add shared libraries
+-e ./shared/q_auth_parser
+-e ./shared/q_knowledgegraph_client
+-e ./shared/q_memory_schemas
+-e ./shared/q_pulse_client
+-e ./shared/q_ui_schemas
+-e ./shared/q_vectorstore_client
+-e ./shared/vault_client
+-e ./shared/observability
+-e ./shared/opentelemetry
+-e ./shared/pulsar_client
+-e ./managerQ 

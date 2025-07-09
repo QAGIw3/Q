@@ -402,7 +402,7 @@ async def reflector_loop(prompt_data, qpulse_client):
 
 # --- Agent Setup ---
 
-def setup_default_agent(config: dict):
+def setup_default_agent(config: dict, vault_client: VaultClient):
     """Sets up the toolbox and context for the default agent."""
     logger.info("Setting up default agent...")
     toolbox = Toolbox()
@@ -488,7 +488,7 @@ def setup_default_agent(config: dict):
     ))
     return toolbox
 
-def setup_reflector_agent(config: dict):
+def setup_reflector_agent(config: dict, vault_client: VaultClient):
     """Sets up the toolbox and context for the reflector agent."""
     logger.info("Setting up reflector agent...")
     toolbox = Toolbox()
@@ -512,41 +512,50 @@ def run_agent():
     # --- Personality Selection ---
     personality = os.environ.get("AGENT_PERSONALITY", "default")
     
+    # --- Vault Client Setup ---
+    # Each agent personality will have its own Vault role
+    vault_role = f"{personality}-role"
+    try:
+        vault_client = VaultClient(role=vault_role)
+    except Exception as e:
+        logger.critical(f"Failed to initialize Vault client with role '{vault_role}'. Agent cannot start.", error=str(e), exc_info=True)
+        return
+
     if personality == "devops":
         agent_id = DEVOPS_AGENT_ID
         task_topic = DEVOPS_TASK_TOPIC
         system_prompt = DEVOPS_SYSTEM_PROMPT
-        toolbox, context_manager = setup_devops_agent(config)
+        toolbox, context_manager = setup_devops_agent(config, vault_client)
     elif personality == "data_analyst":
         agent_id = DA_AGENT_ID
         task_topic = DA_TASK_TOPIC
         system_prompt = DATA_ANALYST_SYSTEM_PROMPT
-        toolbox, context_manager = setup_data_analyst_agent(config)
+        toolbox, context_manager = setup_data_analyst_agent(config, vault_client)
     elif personality == "knowledge_engineer":
         agent_id = KE_AGENT_ID
         task_topic = KE_TASK_TOPIC
         system_prompt = KNOWLEDGE_ENGINEER_SYSTEM_PROMPT
-        toolbox, context_manager = setup_knowledge_engineer_agent(config)
+        toolbox, context_manager = setup_knowledge_engineer_agent(config, vault_client)
     elif personality == "predictive_analyst":
         agent_id = PA_AGENT_ID
         task_topic = PA_TASK_TOPIC
         system_prompt = PREDICTIVE_ANALYST_SYSTEM_PROMPT
-        toolbox, context_manager = setup_predictive_analyst_agent(config)
+        toolbox, context_manager = setup_predictive_analyst_agent(config, vault_client)
     elif personality == "docs_agent":
         agent_id = DOCS_AGENT_ID
         task_topic = DOCS_TASK_TOPIC
         system_prompt = DOCS_AGENT_SYSTEM_PROMPT
-        toolbox, context_manager = setup_docs_agent(config)
+        toolbox, context_manager = setup_docs_agent(config, vault_client)
     elif personality == "reflector":
         agent_id = REFLECTOR_AGENT_ID
         task_topic = REFLECTOR_TASK_TOPIC
         system_prompt = REFLECTOR_SYSTEM_PROMPT
-        toolbox, context_manager = setup_reflector_agent(config)
+        toolbox, context_manager = setup_reflector_agent(config, vault_client)
     else: # Default personality
         agent_id = f"agentq-default-{uuid.uuid4()}"
         task_topic = f"persistent://public/default/q.agentq.tasks.{agent_id}"
         system_prompt = SYSTEM_PROMPT
-        toolbox = setup_default_agent(config)
+        toolbox = setup_default_agent(config, vault_client)
         context_manager = ContextManager(ignite_addresses=config['ignite']['addresses'], agent_id=agent_id)
         context_manager.connect()
 

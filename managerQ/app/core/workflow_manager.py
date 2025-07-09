@@ -2,6 +2,8 @@ import logging
 from typing import Optional, Dict, Any
 from pyignite import Client
 from pyignite.exceptions import PyIgniteError
+from pyignite.queries.op_codes import OP_CACHE_GET_OR_CREATE_WITH_CONFIGURATION
+from pyignite.datatypes import String, Bool, Int, Map, ObjectArray, Collection, prop_codes
 
 from managerQ.app.models import Workflow, WorkflowStatus, TaskStatus
 from managerQ.app.config import settings
@@ -22,8 +24,32 @@ class WorkflowManager:
     def connect(self):
         try:
             self._client.connect(settings.ignite.addresses)
-            self._cache = self._client.get_or_create_cache("workflows")
-            logger.info("WorkflowManager connected to Ignite and got cache 'workflows'.")
+            
+            # Define the schema for the 'workflows' cache, including an index on event_id
+            schema = {
+                'cache_name': 'workflows',
+                'query_entities': [
+                    {
+                        'table_name': 'WORKFLOW',
+                        'key_field_name': 'WORKFLOW_ID',
+                        'key_type_name': 'java.lang.String',
+                        'field_name_aliases': [],
+                        'query_fields': [
+                            {'name': 'WORKFLOW_ID', 'type_name': 'java.lang.String'},
+                            {'name': 'EVENT_ID', 'type_name': 'java.lang.String'},
+                            {'name': 'STATUS', 'type_name': 'java.lang.String'},
+                            # Add other fields you want to query here
+                        ],
+                        'indexes': [
+                            {'name': 'EVENT_ID_IDX', 'is_unique': False, 'fields': {'EVENT_ID': False}},
+                            {'name': 'STATUS_IDX', 'is_unique': False, 'fields': {'STATUS': False}},
+                        ],
+                    },
+                ],
+            }
+            
+            self._cache = self._client.get_or_create_cache(schema)
+            logger.info("WorkflowManager connected to Ignite and got or created cache 'workflows' with schema.")
         except PyIgniteError as e:
             logger.error(f"Failed to connect WorkflowManager to Ignite: {e}", exc_info=True)
             raise
@@ -43,6 +69,21 @@ class WorkflowManager:
         if workflow_data:
             return Workflow(**workflow_data)
         return None
+
+    def get_workflow_by_event_id(self, event_id: str) -> Optional[Workflow]:
+        """Retrieves a workflow from the cache using its event_id."""
+        query = "SELECT * FROM Workflow WHERE event_id = ?"
+        try:
+            cursor = self._cache.sql(query, query_args=[event_id], include_field_names=False)
+            row = next(cursor, None)
+            if row:
+                # Assuming the order of fields in the row matches the model
+                # A more robust way is to use include_field_names=True and map by name
+                return Workflow(**row)
+            return None
+        except PyIgniteError as e:
+            logger.error(f"Failed to query for workflow by event_id '{event_id}': {e}", exc_info=True)
+            return None
 
     def update_task_status(
         self,

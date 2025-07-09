@@ -3,7 +3,7 @@ import json
 from typing import List, Dict, Any
 
 from agentQ.app.core.toolbox import Tool
-from shared.q_ui_schemas import UITable
+from shared.q_ui_schemas import UITable, UIForm
 
 logger = logging.getLogger(__name__)
 
@@ -32,4 +32,29 @@ generate_table_tool = Tool(
     name="generate_table",
     description="Use this to display data in a table within the user interface. It takes a list of headers and a list of rows.",
     func=generate_table
+)
+
+def generate_form(schema: Dict[str, Any]) -> str:
+    """
+    Generates a JSON representation of a form to be rendered in the UI.
+    Use this to request structured data from the user.
+
+    Args:
+        schema (Dict[str, Any]): A JSON schema representing the form fields.
+
+    Returns:
+        A JSON string representing the form UI component.
+    """
+    logger.info("Generating UI form component.")
+    try:
+        form = UIForm(schema=schema)
+        return form.json()
+    except Exception as e:
+        logger.error(f"Failed to generate UI form: {e}", exc_info=True)
+        return '{"error": "Failed to generate form."}'
+
+generate_form_tool = Tool(
+    name="generate_form",
+    description="Use this to request structured data from the user via a form.",
+    func=generate_form
 ) 

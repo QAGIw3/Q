@@ -1,0 +1,41 @@
+.react-flow__node-default,
+.react-flow__node-input,
+.react-flow__node-output {
+    border-radius: 5px;
+    border-width: 2px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+    transition: all 0.3s cubic-bezier(.25,.8,.25,1);
+}
+
+.react-flow__node-default.status-pending {
+    background-color: #e0e0e0; /* Grey */
+    border-color: #bdbdbd;
+}
+
+.react-flow__node-default.status-running {
+    background-color: #bbdefb; /* Light Blue */
+    border-color: #64b5f6;
+    animation: pulse 2s infinite;
+}
+
+.react-flow__node-default.status-completed {
+    background-color: #c8e6c9; /* Light Green */
+    border-color: #81c784;
+}
+
+.react-flow__node-default.status-failed {
+    background-color: #ffcdd2; /* Light Red */
+    border-color: #e57373;
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(100, 181, 246, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(100, 181, 246, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(100, 181, 246, 0);
+    }
+} 

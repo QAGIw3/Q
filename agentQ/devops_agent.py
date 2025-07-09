@@ -14,6 +14,8 @@ from agentQ.app.core.workflow_tools import read_context_tool, update_context_too
 from agentQ.app.core.code_search_tool import code_search_tool
 from agentQ.app.core.reporting_tool import log_incident_report_tool
 from agentQ.app.core.git_tool import propose_code_fix_tool
+from agentQ.app.core.delegation_tool import delegation_tool
+from shared.vault_client import VaultClient
 
 logger = structlog.get_logger("devops_agent")
 
@@ -31,14 +33,15 @@ You have been triggered by an alert. Your task is to investigate the issue, dete
 1.  **Check for Collaboration:** Before you begin, use `read_shared_context` to see if other agents have already posted findings about this workflow. The `workflow_id` will be in your prompt.
 2.  Start by using the `get_service_logs` tool to examine recent errors for the affected service.
 3.  Use `get_service_dependencies` to understand the blast radius and see what other services might be affected.
-4.  Use `get_recent_deployments` to check for any code or configuration changes that were recently deployed for the service. This is a primary suspect for new issues.
-5.  Correlate the information from logs, dependencies, and recent deployments to form a hypothesis about the root cause.
-6.  **Share Your Findings:** Once you have a hypothesis or useful data, use `update_shared_context` to post your findings to the workflow's shared context for other agents to see.
-7.  **Propose a Code Fix:** If you identify a bug in the code using `search_codebase`, you can propose a fix. Generate the new, corrected code content for the entire file. Then, use the `propose_code_fix` tool to create a pull request. You will need to provide a clear `commit_message`, `pr_title`, and `pr_body`.
-8.  If you believe a corrective action is necessary that does not involve a code change (e.g., 'rollback_deployment', 'restart_service'), you **MUST** first ask for human confirmation.
-9.  **ONLY** after receiving explicit approval from the human in a subsequent turn may you use the proposed tool.
-10. **Crucially**, after taking a corrective action or proposing a code fix, use the `log_incident_report` tool to create a record of the incident, its root cause, and the steps you took. This is your final action before finishing.
-11. Once you have logged the report or determined the issue cannot be resolved by you, use the `finish` action to provide your final summary.
+4.  **Delegate to Data Analyst:** If the logs are inconclusive or if you suspect the issue is related to a specific usage pattern, **delegate** a task to the `data_analyst_agent`. Ask it to find correlations between performance metrics and user activity.
+5.  Use `get_recent_deployments` to check for any code or configuration changes that were recently deployed for the service. This is a primary suspect for new issues.
+6.  Correlate the information from logs, dependencies, and recent deployments to form a hypothesis about the root cause.
+7.  **Share Your Findings:** Once you have a hypothesis or useful data, use `update_shared_context` to post your findings to the workflow's shared context for other agents to see.
+8.  **Propose a Code Fix:** If you identify a bug in the code using `search_codebase`, you can propose a fix. Generate the new, corrected code content for the entire file. Then, use the `propose_code_fix` tool to create a pull request. You will need to provide a clear `commit_message`, `pr_title`, and `pr_body`.
+9.  If you believe a corrective action is necessary that does not involve a code change (e.g., 'rollback_deployment', 'restart_service'), you **MUST** first ask for human confirmation.
+10. **ONLY** after receiving explicit approval from the human in a subsequent turn may you use the proposed tool.
+11. **Crucially**, after taking a corrective action or proposing a code fix, use the `log_incident_report` tool to create a record of the incident, its root cause, and the steps you took. This is your final action before finishing.
+12. Once you have logged the report or determined the issue cannot be resolved by you, use the `finish` action to provide your final summary.
 
 Here are the tools you have available:
 {tools}
@@ -51,7 +54,7 @@ def load_config():
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-def setup_devops_agent(config: dict):
+def setup_devops_agent(config: dict, vault_client: VaultClient):
     """
     Initializes the toolbox and context manager for the DevOps agent.
     This function would be called by the main agent runner.
@@ -60,24 +63,27 @@ def setup_devops_agent(config: dict):
 
     devops_toolbox = Toolbox()
     
-    # Pass the service URLs to the tools that need them
-    devops_toolbox.register_tool(Tool(name=get_service_logs_tool.name, description=get_service_logs_tool.description, func=get_service_logs_tool.func, config=config['services']))
-    devops_toolbox.register_tool(Tool(name=get_service_dependencies_tool.name, description=get_service_dependencies_tool.description, func=get_service_dependencies_tool.func, config=config['services']))
-    devops_toolbox.register_tool(Tool(name=get_recent_deployments_tool.name, description=get_recent_deployments_tool.description, func=get_recent_deployments_tool.func, config=config['services']))
-    devops_toolbox.register_tool(Tool(name=rollback_deployment_tool.name, description=rollback_deployment_tool.description, func=rollback_deployment_tool.func, config=config['services']))
-    devops_toolbox.register_tool(Tool(name=restart_service_tool.name, description=restart_service_tool.description, func=restart_service_tool.func, config=config['services']))
-    devops_toolbox.register_tool(Tool(name=increase_replicas_tool.name, description=increase_replicas_tool.description, func=increase_replicas_tool.func, config=config['services']))
-    devops_toolbox.register_tool(Tool(name=list_pods_tool.name, description=list_pods_tool.description, func=list_pods_tool.func, config=config['services']))
-    devops_toolbox.register_tool(log_incident_report_tool)
+    # Pass the service URLs and vault client to the tools that need them
+    tool_config = {**config['services'], 'vault_client': vault_client}
+
+    devops_toolbox.register_tool(Tool(name=get_service_logs_tool.name, description=get_service_logs_tool.description, func=get_service_logs_tool.func, config=tool_config))
+    devops_toolbox.register_tool(Tool(name=get_service_dependencies_tool.name, description=get_service_dependencies_tool.description, func=get_service_dependencies_tool.func, config=tool_config))
+    devops_toolbox.register_tool(Tool(name=get_recent_deployments_tool.name, description=get_recent_deployments_tool.description, func=get_recent_deployments_tool.func, config=tool_config))
+    devops_toolbox.register_tool(Tool(name=rollback_deployment_tool.name, description=rollback_deployment_tool.description, func=rollback_deployment_tool.func, config=tool_config))
+    devops_toolbox.register_tool(Tool(name=restart_service_tool.name, description=restart_service_tool.description, func=restart_service_tool.func, config=tool_config))
+    devops_toolbox.register_tool(Tool(name=increase_replicas_tool.name, description=increase_replicas_tool.description, func=increase_replicas_tool.func, config=tool_config))
+    devops_toolbox.register_tool(Tool(name=list_pods_tool.name, description=list_pods_tool.description, func=list_pods_tool.func, config=tool_config))
+    devops_toolbox.register_tool(Tool(name=log_incident_report_tool.name, description=log_incident_report_tool.description, func=log_incident_report_tool.func, config=tool_config))
     
     # General tools
     devops_toolbox.register_tool(human_tool)
-    devops_toolbox.register_tool(Tool(name=integrationhub_tool.name, description=integrationhub_tool.description, func=integrationhub_tool.func, config=config['services']))
+    devops_toolbox.register_tool(Tool(name=integrationhub_tool.name, description=integrationhub_tool.description, func=integrationhub_tool.func, config=tool_config))
+    devops_toolbox.register_tool(delegation_tool)
     devops_toolbox.register_tool(list_tools_tool)
     devops_toolbox.register_tool(read_context_tool)
     devops_toolbox.register_tool(update_context_tool)
-    devops_toolbox.register_tool(code_search_tool)
-    devops_toolbox.register_tool(propose_code_fix_tool)
+    devops_toolbox.register_tool(Tool(name=code_search_tool.name, description=code_search_tool.description, func=code_search_tool.func, config=tool_config))
+    devops_toolbox.register_tool(Tool(name=propose_code_fix_tool.name, description=propose_code_fix_tool.description, func=propose_code_fix_tool.func, config=tool_config))
     
     # Context can be shared or agent-specific
     context_manager = ContextManager(ignite_addresses=config['ignite']['addresses'], agent_id=AGENT_ID)

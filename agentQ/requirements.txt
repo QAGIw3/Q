@@ -38,3 +38,4 @@ fastavro
 pyignite
 sentence-transformers
 kubernetes
+matplotlib

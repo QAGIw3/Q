@@ -22,7 +22,10 @@ def _get_airflow_config(config: Dict[str, Any]) -> (str, httpx.AsyncClient):
         if not airflow_url:
             raise ValueError("airflow_url not found in tool configuration.")
 
-        vault_client = VaultClient()
+        vault_client = config.get("vault_client")
+        if not vault_client or not isinstance(vault_client, VaultClient):
+            raise ValueError("VaultClient not found or invalid in tool configuration.")
+
         username = vault_client.read_secret(AIRFLOW_CONFIG_VAULT_PATH, "username")
         password = vault_client.read_secret(AIRFLOW_CONFIG_VAULT_PATH, "password")
 
