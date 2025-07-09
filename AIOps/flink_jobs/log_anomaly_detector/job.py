@@ -3,6 +3,7 @@ import json
 import logging
 from collections import deque
 import numpy as np
+import uuid
 
 from pyflink.common import WatermarkStrategy, Time
 from pyflink.common.typeinfo import Types
@@ -85,6 +86,7 @@ class AnomalyDetector(KeyedProcessFunction):
                 is_anomaly = (error_count - mean) / std_dev > self.std_dev_threshold
                 if is_anomaly:
                     anomaly_event = {
+                        "event_id": f"event_{uuid.uuid4()}",
                         "event_type": "anomaly.detected.error_rate",
                         "source": "AIOpsWatchtower",
                         "payload": {

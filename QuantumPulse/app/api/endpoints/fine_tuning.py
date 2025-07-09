@@ -3,7 +3,7 @@ import uuid
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from shared.q_auth_parser.parser import get_current_user
 from shared.q_auth_parser.models import UserClaims
@@ -17,8 +17,8 @@ router = APIRouter()
 
 # --- Pydantic Models ---
 class PreferencePair(BaseModel):
-    chosen: str = Field(..., description="The preferred (e.g., 'good' feedback) response from a prompt.")
-    rejected: str = Field(..., description="The rejected (e.g., 'bad' feedback) response from the same prompt.")
+    chosen: Optional[str] = Field(None, description="The preferred (e.g., 'good' feedback) response from a prompt.")
+    rejected: Optional[str] = Field(None, description="The rejected (e.g., 'bad' feedback) response from the same prompt.")
     prompt: str = Field(..., description="The original prompt that led to the chosen/rejected responses.")
 
 class FineTuneRequest(BaseModel):

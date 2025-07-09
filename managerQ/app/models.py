@@ -3,6 +3,44 @@ from typing import List, Dict, Any, Optional, Literal, Union
 from enum import Enum
 import uuid
 
+# --- Search Models ---
+
+class SearchQuery(BaseModel):
+    """Represents a user's search query."""
+    query: str = Field(..., description="The search term or question from the user.")
+    session_id: Optional[str] = Field(None, description="An optional session ID for conversational context.")
+
+class VectorStoreResult(BaseModel):
+    """Represents a single search result from the vector store."""
+    source: str = Field(..., description="The origin of the document (e.g., file path, URL).")
+    content: str = Field(..., description="The text content of the search result chunk.")
+    score: float = Field(..., description="The similarity score of the result.")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Any additional metadata.")
+
+class KGNode(BaseModel):
+    """Represents a node in the knowledge graph."""
+    id: str
+    label: str
+    properties: Dict[str, Any]
+
+class KGEdge(BaseModel):
+    """Represents an edge between two nodes in the knowledge graph."""
+    source: str
+    target: str
+    label: str
+
+class KnowledgeGraphResult(BaseModel):
+    """Represents a subgraph from the knowledge graph relevant to the query."""
+    nodes: List[KGNode]
+    edges: List[KGEdge]
+
+class SearchResponse(BaseModel):
+    """The final, aggregated response for a search query."""
+    ai_summary: Optional[str] = Field(None, description="An AI-generated summary of the search results.")
+    vector_results: List[VectorStoreResult] = Field(default_factory=list, description="Results from the vector store.")
+    knowledge_graph_result: Optional[KnowledgeGraphResult] = Field(None, description="Results from the knowledge graph.")
+
+
 class TaskStatus(str, Enum):
     PENDING = "pending"
     DISPATCHED = "dispatched"

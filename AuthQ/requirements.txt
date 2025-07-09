@@ -3,11 +3,7 @@ uvicorn[standard]
 python-keycloak-client
 python-jose[cryptography]
 pydantic
- 
-# Shared Libraries
-pyyaml
--e ./shared/q_auth_parser
- 
+
 # Shared Libraries
 pyyaml
 -e ./shared/q_auth_parser

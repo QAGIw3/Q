@@ -1,0 +1,48 @@
+# managerQ/app/workflow_templates/root_cause_analysis_workflow.yaml
+original_prompt: "Root cause analysis for anomaly in service: {{ service_name }}"
+shared_context:
+  service_name: "{{ service_name }}"
+  original_event_payload: "{{ original_event_payload }}"
+tasks:
+  - task_id: "investigate_infra"
+    type: "task"
+    agent_personality: "devops_agent"
+    prompt: >
+      An error rate anomaly has been detected in the '{{ service_name }}' service.
+      Investigate the current state of the Kubernetes deployment for this service.
+      Check the pod statuses, recent events, and resource utilization (CPU/memory).
+      Your goal is to identify any infrastructure-level issues like pod crashes,
+      resource throttling, or deployment errors.
+      The original event payload is: {{ original_event_payload }}
+    dependencies: []
+  
+  - task_id: "analyze_logs"
+    type: "task"
+    agent_personality: "data_analyst_agent"
+    prompt: >
+      Following an infrastructure check, analyze the centralized logs for the
+      '{{ service_name }}' service around the time of the anomaly.
+      The infrastructure investigation returned: {{ tasks.investigate_infra.result }}
+      Look for spikes in error messages, specific exception stack traces, or any
+      unusual log patterns that could pinpoint the root cause of the error rate increase.
+      Query logs in a 15-minute window around the event time.
+    dependencies:
+      - "investigate_infra"
+
+  - task_id: "synthesize_report"
+    type: "task"
+    agent_personality: "reflector_agent"
+    prompt: >
+      Synthesize the findings from the infrastructure investigation and log analysis
+      into a final root cause analysis report.
+      
+      Infrastructure Findings:
+      {{ tasks.investigate_infra.result }}
+      
+      Log Analysis Findings:
+      {{ tasks.analyze_logs.result }}
+
+      Provide a concise summary of the likely root cause and suggest potential
+      remediation steps. Structure your output as a markdown report.
+    dependencies:
+      - "analyze_logs" 

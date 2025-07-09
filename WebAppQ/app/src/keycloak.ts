@@ -1,9 +1,14 @@
+// WebAppQ/app/src/keycloak.ts
 import Keycloak from 'keycloak-js';
 
-const keycloak = new Keycloak({
-  url: 'http://localhost:8080/', // Your Keycloak server URL
-  realm: 'q-platform',
-  clientId: 'q-webapp', // The client ID you will create in Keycloak
-});
+// The configuration would typically come from environment variables
+// or a configuration service, not be hardcoded.
+const keycloakConfig = {
+    realm: process.env.REACT_APP_KEYCLOAK_REALM || 'QPlatformRealm',
+    url: process.env.REACT_APP_KEYCLOAK_URL || 'http://localhost:8080/auth',
+    clientId: process.env.REACT_APP_KEYCLOAK_CLIENT_ID || 'webapp-q-client',
+};
+
+const keycloak = new Keycloak(keycloakConfig);
 
 export default keycloak; 

@@ -1,20 +1,15 @@
 import { w3cwebsocket as W3CWebSocket, IMessageEvent } from "websocket";
+import { SearchQuery, SearchResponse } from './types';
+import keycloak from "../keycloak";
 
 const API_BASE_URL = process.env.REACT_APP_MANAGERQ_API_URL || 'http://localhost:8000/api/v1';
-
-// A simple in-memory token store. In a real app, use something more robust.
-let authToken: string | null = null;
-
-export const setAuthToken = (token: string) => {
-    authToken = token;
-};
 
 const getHeaders = () => {
     const headers: { [key: string]: string } = {
         'Content-Type': 'application/json',
     };
-    if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
+    if (keycloak.authenticated && keycloak.token) {
+        headers['Authorization'] = `Bearer ${keycloak.token}`;
     }
     return headers;
 };
@@ -74,10 +69,11 @@ export const approveWorkflowTask = async (workflowId: string, taskId: string, ap
     // This endpoint returns 204 No Content, so we don't return JSON
 };
 
-export const cognitiveSearch = async (query: string) => {
-    const params = new URLSearchParams({ query });
-    const response = await fetch(`${API_BASE_URL}/search?${params.toString()}`, {
+export const cognitiveSearch = async (searchQuery: SearchQuery): Promise<SearchResponse> => {
+    const response = await fetch(`${API_BASE_URL}/search/`, {
+        method: 'POST',
         headers: getHeaders(),
+        body: JSON.stringify(searchQuery),
     });
     if (!response.ok) {
         const error = await response.json();

@@ -1,0 +1,37 @@
+# infra/kubernetes/base/authq/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authq
+  labels:
+    app: authq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authq
+  template:
+    metadata:
+      labels:
+        app: authq
+    spec:
+      serviceAccountName: authq-sa # Assuming a service account with vault access
+      containers:
+      - name: authq
+        image: q-platform/authq:latest # Replace with your actual image repository
+        ports:
+        - containerPort: 8000
+        env:
+        # Configuration is loaded from Vault by the application,
+        # but we might need to point it to the Vault instance.
+        - name: VAULT_ADDR
+          value: "http://vault.vault.svc.cluster.local:8200"
+        - name: VAULT_ROLE
+          value: "authq-role"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi" 

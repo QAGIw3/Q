@@ -1,4 +1,4 @@
-# kubernetes/base/kustomization.yaml
+# infra/kubernetes/base/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -7,10 +7,11 @@ namespace: q-platform
 
 # List of all the service manifests to include in the deployment
 resources:
+  - ./agentq
+  - ./h2m-service
+  - ./knowledgegraphq
   - ./manager-q
   - ./quantumpulse
   - ./vectorstore-q
   - ./webapp-q
-  - ./h2m-service
-  - ./knowledgegraphq
-  - ./agentq 
+  - ./authq 

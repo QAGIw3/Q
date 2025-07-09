@@ -3,6 +3,7 @@ import threading
 from typing import Optional, List, Set
 import jinja2
 import json
+from datetime import datetime
 
 from managerQ.app.core.workflow_manager import workflow_manager
 from managerQ.app.core.task_dispatcher import task_dispatcher
@@ -14,6 +15,7 @@ from managerQ.app.config import settings
 from shared.pulsar_tracing import inject_trace_context, extract_trace_context
 from opentelemetry import trace
 from shared.observability.metrics import WORKFLOW_COMPLETED_COUNTER, WORKFLOW_DURATION_HISTOGRAM, TASK_COMPLETED_COUNTER
+from managerQ.app.dependencies import get_kg_client # Import the dependency provider
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -149,7 +151,81 @@ class WorkflowExecutor:
                 workflow_id=workflow.workflow_id,
                 data={"status": final_status.value}
             )))
-            self._trigger_reflection_task(workflow)
+            
+            # Check if this was an AIOps workflow and handle the final report
+            if workflow.event_id and final_status == WorkflowStatus.COMPLETED:
+                self._handle_completed_aiops_workflow(workflow)
+            else:
+                self._trigger_reflection_task(workflow)
+
+    def _handle_completed_aiops_workflow(self, workflow: Workflow):
+        """
+        Handles the completion of a event-driven workflow, like the AIOps one,
+        by ingesting the final report into the Knowledge Graph.
+        """
+        logger.info(f"Handling completed AIOps workflow '{workflow.workflow_id}'.")
+        
+        # Find the final task (a task with no other tasks depending on it)
+        all_task_ids = {task.task_id for task in workflow.get_all_tasks_recursive()}
+        dependency_ids = set()
+        for task in workflow.get_all_tasks_recursive():
+            dependency_ids.update(task.dependencies)
+            
+        final_task_ids = all_task_ids - dependency_ids
+        
+        if not final_task_ids:
+            logger.warning(f"Could not determine final task for AIOps workflow '{workflow.workflow_id}'.")
+            return
+            
+        # Assuming one final report task for simplicity
+        final_task_id = final_task_ids.pop()
+        final_task = workflow.get_task(final_task_id)
+        
+        if not final_task or not final_task.result:
+            logger.warning(f"Final task '{final_task_id}' for AIOps workflow has no result to ingest.")
+            return
+            
+        service_name = workflow.shared_context.get("service_name")
+        if not service_name:
+            logger.warning("AIOps workflow is missing 'service_name' in shared_context.")
+            return
+
+        logger.info(f"Ingesting final report from task '{final_task_id}' into Knowledge Graph.")
+        
+        try:
+            # This is not ideal, but a workaround for the client management issue
+            kg_client = get_kg_client()
+            
+            report_content = final_task.result.replace("'", "\\'") # Simple escaping for Gremlin
+            
+            # Gremlin query to create the report and link it
+            query = f"""
+            def report = g.addV('Report')
+                           .property('source', 'AIOpsWorkflow')
+                           .property('content', '{report_content}')
+                           .property('createdAt', '{datetime.utcnow().isoformat()}')
+                           .next()
+            
+            def service = g.V().has('Service', 'name', '{service_name}').tryNext().orElse(null)
+            if (service != null) {{
+                g.V(report).addE('REPORT_FOR').to(service).iterate()
+            }}
+            
+            def event = g.V().has('Event', 'eventId', '{workflow.event_id}').tryNext().orElse(null)
+            if (event != null) {{
+                g.V(report).addE('GENERATED_FROM').to(event).iterate()
+            }}
+            
+            return report
+            """
+            
+            # We need to run this async function in our sync thread
+            asyncio.run(kg_client.execute_gremlin_query(query))
+            logger.info("Successfully ingested AIOps report into Knowledge Graph.")
+        
+        except Exception as e:
+            logger.error(f"Failed to ingest AIOps report into Knowledge Graph: {e}", exc_info=True)
+
 
     def _trigger_reflection_task(self, workflow: Workflow):
         """Creates and dispatches a task for a 'reflector' agent to analyze a completed workflow."""

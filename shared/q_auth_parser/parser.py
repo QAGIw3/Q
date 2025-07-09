@@ -3,6 +3,8 @@ from fastapi.security import OAuth2PasswordBearer
 import json
 import base64
 import logging
+import os
+import httpx
 from typing import Optional
 import yaml
 from jose import JWTError, jwt
@@ -13,32 +15,17 @@ from .models import UserClaims
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# --- Keycloak Configuration ---
+# --- AuthQ Client Configuration ---
+AUTHQ_API_URL = os.getenv("AUTHQ_API_URL", "http://authq:8000")
+authq_client = httpx.AsyncClient(base_url=AUTHQ_API_URL)
 
-def load_keycloak_config():
-    # This path is relative to the service root, not this file.
-    # TODO: Make this path configurable via environment variable.
-    with open("../AuthQ/config/auth.yaml", 'r') as f:
-        return yaml.safe_load(f)["keycloak"]
-
-keycloak_config = load_keycloak_config()
-
-keycloak_openid = KeycloakOpenID(
-    server_url=keycloak_config["server_url"],
-    client_id=keycloak_config["client_id"],
-    realm_name=keycloak_config["realm_name"],
-    client_secret_key=keycloak_config["client_secret"]
-)
-
-# Fetch the public key from Keycloak's certs endpoint
-keycloak_public_key = "-----BEGIN PUBLIC KEY-----\n" + keycloak_openid.public_key() + "\n-----END PUBLIC KEY-----"
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{AUTHQ_API_URL}/api/v1/auth/token")
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserClaims:
     """
-    FastAPI dependency to decode and validate a JWT token from the Authorization header.
+    FastAPI dependency that validates a token by calling the AuthQ service's
+    introspect endpoint.
     Returns the user claims upon successful validation.
     """
     credentials_exception = HTTPException(
@@ -47,17 +34,18 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserClaims:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        # Decode the token using Keycloak's public key
-        payload = jwt.decode(
-            token,
-            keycloak_public_key,
-            algorithms=["RS256"],
-            audience=keycloak_config.get("client_id"), # or another client like 'account'
-            options={"verify_signature": True, "verify_aud": True, "exp": True}
+        response = await authq_client.post(
+            "/api/v1/auth/introspect",
+            headers={"Authorization": f"Bearer {token}"}
         )
         
-        # Map Keycloak claims to our UserClaims model
-        # Note: You may need to adjust these field names based on your Keycloak token configuration
+        if response.status_code != 200:
+            logger.warning(f"Token introspection failed with status {response.status_code}: {response.text}")
+            raise credentials_exception
+            
+        payload = response.json()
+        
+        # Map Keycloak claims from the introspect response to our UserClaims model
         user_claims = UserClaims(
             user_id=payload.get("sub"),
             username=payload.get("preferred_username"),
@@ -65,11 +53,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserClaims:
             roles=payload.get("realm_access", {}).get("roles", []),
         )
         return user_claims
-    except JWTError as e:
-        logger.error(f"JWT Error: {e}", exc_info=True)
-        raise credentials_exception
+    except httpx.RequestError as e:
+        logger.error(f"Failed to connect to AuthQ service for token introspection: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is unavailable."
+        )
     except Exception as e:
-        logger.error(f"User claims validation failed: {e}", exc_info=True)
+        logger.error(f"User claims validation failed during introspection: {e}", exc_info=True)
         raise credentials_exception
 
 

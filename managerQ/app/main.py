@@ -1,9 +1,10 @@
 # managerQ/app/main.py
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 import uvicorn
 import yaml
 import structlog
+from contextlib import asynccontextmanager
 
 from managerQ.app.api import tasks, goals, dashboard_ws, agent_tasks, workflows, search
 from managerQ.app.core.agent_registry import AgentRegistry, agent_registry as agent_registry_instance
@@ -19,6 +20,9 @@ from shared.observability.metrics import setup_metrics
 from managerQ.app.core.goal_manager import GoalManager, goal_manager
 from managerQ.app.core.goal import Goal
 from shared.vault_client import VaultClient
+from shared.q_vectorstore_client.client import VectorStoreClient
+from shared.q_knowledgegraph_client.client import KnowledgeGraphClient
+from shared.q_pulse_client.client import QuantumPulseClient
 
 # --- Logging and Metrics ---
 setup_logging(service_name=settings.service_name)
@@ -47,69 +51,73 @@ def load_config_from_vault():
     """Loads configuration from Vault."""
     try:
         vault_client = VaultClient(role="managerq-role")
-        # The entire config is the secret's data
         config = vault_client.read_secret_data("secret/data/managerq/config")
+        if not config:
+            logger.critical("Failed to load configuration from Vault: secret is empty.")
+            raise ValueError("Vault secret for managerq is empty.")
         return config
     except Exception as e:
         logger.critical(f"Failed to load configuration from Vault: {e}", exc_info=True)
         raise
 
 config = load_config_from_vault()
-pulsar_config = config['pulsar']
+pulsar_config = config.get('pulsar', {})
+vectorstore_q_config = config.get('vectorstore_q', {})
+knowledgegraph_q_config = config.get('knowledgegraph_q', {})
+quantumpulse_config = config.get('quantumpulse', {})
 
-# --- FastAPI App ---
-app = FastAPI(
-    title=config['service_name'],
-    version=config['version'],
-    description="A service to manage and orchestrate autonomous AI agents."
-)
-
-# Setup Prometheus metrics
-setup_metrics(app, app_name=config['service_name'])
-
-@app.on_event("startup")
-def startup_event():
-    """Initializes and starts all background services."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Manages the lifecycle of the application's resources, including background services and API clients.
+    """
     logger.info("ManagerQ starting up...")
+
+    # Initialize API Clients
+    app.state.vector_store_client = VectorStoreClient(base_url=vectorstore_q_config.get('url'))
+    app.state.kg_client = KnowledgeGraphClient(base_url=knowledgegraph_q_config.get('url'))
+    app.state.pulse_client = QuantumPulseClient(base_url=quantumpulse_config.get('url'))
     
+    # Initialize and start background services
     dashboard_ws.manager.startup()
     
     global agent_registry_instance, task_dispatcher_instance, result_listener_instance
-    event_listener_instance = None # Define instance variable
+    event_listener_instance = None
 
     agent_registry_instance = AgentRegistry(
-        service_url=pulsar_config['service_url'],
-        registration_topic=pulsar_config['topics']['registration']
+        service_url=pulsar_config.get('service_url'),
+        registration_topic=pulsar_config.get('topics', {}).get('registration')
     )
-    task_dispatcher_instance = TaskDispatcher(service_url=pulsar_config['service_url'])
+    task_dispatcher_instance = TaskDispatcher(service_url=pulsar_config.get('service_url'))
     result_listener_instance = ResultListener(
-        service_url=pulsar_config['service_url'],
-        results_topic=pulsar_config['topics']['results']
+        service_url=pulsar_config.get('service_url'),
+        results_topic=pulsar_config.get('topics', {}).get('results')
     )
     
     agent_registry_instance.start()
     task_dispatcher_instance.start()
     result_listener_instance.start()
     
-    # Start the workflow executor
     workflow_executor.start()
-    load_predefined_goals() # Load goals before starting the monitor
+    load_predefined_goals()
     proactive_goal_monitor.start()
     autoscaler.start()
     
-    # Start event listener in a separate thread
-    event_listener_instance = EventListener(settings.pulsar.service_url, settings.pulsar.topics.platform_events)
-    # Note: The EventListener's start() is blocking, so it must be run in a thread
-    # or with an async library to not block the main FastAPI app.
-    # For now, we'll rely on the threading inside the class which is not ideal.
+    platform_events_topic = getattr(settings.pulsar.topics, 'platform_events', 'persistent://public/default/platform-events')
+    event_listener_instance = EventListener(settings.pulsar.service_url, platform_events_topic)
     import threading
     threading.Thread(target=event_listener_instance.start, daemon=True).start()
 
+    yield  # Application is running
 
-@app.on_event("shutdown")
-def shutdown_event():
-    """Stops all background services gracefully."""
     logger.info("ManagerQ shutting down...")
+    
+    # Close client connections
+    await app.state.vector_store_client.close()
+    await app.state.kg_client.close()
+    await app.state.pulse_client.close()
+
+    # Stop background services
     dashboard_ws.manager.shutdown()
     agent_registry_instance.stop()
     task_dispatcher_instance.stop()
@@ -117,7 +125,28 @@ def shutdown_event():
     workflow_executor.stop()
     proactive_goal_monitor.stop()
     autoscaler.stop()
-    # The event listener thread will exit when the main process does.
+
+
+# --- FastAPI App ---
+app = FastAPI(
+    title=config.get('service_name', 'ManagerQ'),
+    version=config.get('version', '0.1.0'),
+    description="A service to manage and orchestrate autonomous AI agents.",
+    lifespan=lifespan
+)
+
+# Setup Prometheus metrics
+setup_metrics(app, app_name=config.get('service_name', 'managerq'))
+
+# --- Dependency Providers ---
+def get_vector_store_client(request: Request) -> VectorStoreClient:
+    return request.app.state.vector_store_client
+
+def get_kg_client(request: Request) -> KnowledgeGraphClient:
+    return request.app.state.kg_client
+
+def get_pulse_client(request: Request) -> QuantumPulseClient:
+    return request.app.state.pulse_client
 
 # --- API Routers ---
 app.include_router(tasks.router, prefix="/v1/tasks", tags=["Tasks"])
@@ -135,7 +164,7 @@ def health_check():
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host=config['api']['host'],
-        port=config['api']['port'],
+        host=config.get('api', {}).get('host', '0.0.0.0'),
+        port=config.get('api', {}).get('port', 8000),
         reload=True
     )

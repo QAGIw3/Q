@@ -1,0 +1,13 @@
+# infra/kubernetes/base/authq/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: authq
+spec:
+  selector:
+    app: authq
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: ClusterIP 

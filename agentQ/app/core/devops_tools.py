@@ -41,62 +41,6 @@ except config.ConfigException:
         k8s_custom_objects_api = None
 
 
-def get_service_logs(service_name: str, time_window: str = "15m") -> str:
-    """
-    Retrieves recent logs for a specific service from the centralized logging system.
-    This is useful for understanding the immediate behavior and errors of a service.
-    
-    Args:
-        service_name (str): The name of the service to query (e.g., 'IntegrationHub').
-        time_window (str): The time window to query (e.g., '15m', '1h', '3d').
-    
-    Returns:
-        A string containing the most recent log entries, or an error message.
-    """
-    logger.info(f"DevOps Tool: Getting logs for '{service_name}' in the last {time_window}.")
-    
-    try:
-        # A simple way to parse time window from string
-        # A more robust solution would use a dedicated parsing library
-        if time_window.endswith('m'):
-            delta = timedelta(minutes=int(time_window[:-1]))
-        elif time_window.endswith('h'):
-            delta = timedelta(hours=int(time_window[:-1]))
-        elif time_window.endswith('d'):
-            delta = timedelta(days=int(time_window[:-1]))
-        else:
-            return "Error: Invalid time window format. Use 'm', 'h', or 'd'."
-
-        query = {
-            "query": {
-                "bool": {
-                    "must": [
-                        {"match": {"service_name": service_name}},
-                        {"range": {"timestamp": {"gte": (datetime.utcnow() - delta).isoformat()}}}
-                    ]
-                }
-            },
-            "size": 50, # Limit the number of logs returned
-            "sort": [{"timestamp": {"order": "desc"}}]
-        }
-
-        # Assuming logs are indexed daily in a pattern like 'platform-logs-YYYY-MM-DD'
-        # We'll search across recent indices.
-        response = es_client.search(index="platform-logs-*", body=query)
-        
-        hits = response['hits']['hits']
-        if not hits:
-            return f"No logs found for service '{service_name}' in the last {time_window}."
-        
-        # Format logs for readability
-        formatted_logs = [json.dumps(hit['_source']) for hit in hits]
-        return "Found recent logs:\n" + "\n".join(formatted_logs)
-
-    except Exception as e:
-        logger.error(f"Failed to query Elasticsearch for logs: {e}", exc_info=True)
-        return f"Error: Could not retrieve logs from Elasticsearch. Details: {e}"
-
-
 def get_service_dependencies(service_name: str) -> str:
     """
     Queries the Knowledge Graph to find the upstream and downstream dependencies of a service.
@@ -346,13 +290,90 @@ def list_kubernetes_pods(namespace: str = "default") -> str:
         return f"Error: An unexpected error occurred while listing pods: {e}"
 
 
-# --- Tool Registration ---
+def get_kubernetes_deployment_status(service_name: str, namespace: str = "default") -> str:
+    """
+    Provides a comprehensive status report for a Kubernetes deployment,
+    including deployment status, pod details, and recent events.
 
-get_service_logs_tool = Tool(
-    name="get_service_logs",
-    description="Retrieves recent logs for a specific service from the centralized logging system.",
-    func=get_service_logs
-)
+    Args:
+        service_name (str): The name of the Kubernetes deployment.
+        namespace (str): The Kubernetes namespace.
+
+    Returns:
+        A JSON string with the detailed status, or an error message.
+    """
+    if not k8s_apps_v1 or not k8s_core_v1:
+        return "Error: Kubernetes client is not configured."
+
+    logger.info(f"DevOps Tool: Getting comprehensive status for deployment '{service_name}' in namespace '{namespace}'.")
+    
+    try:
+        # 1. Get Deployment details
+        deployment = k8s_apps_v1.read_namespaced_deployment(name=service_name, namespace=namespace)
+        deployment_status = {
+            "name": deployment.metadata.name,
+            "replicas": deployment.spec.replicas,
+            "ready_replicas": deployment.status.ready_replicas or 0,
+            "available_replicas": deployment.status.available_replicas or 0,
+            "unavailable_replicas": deployment.status.unavailable_replicas or 0,
+            "conditions": [c.message for c in deployment.status.conditions]
+        }
+
+        # 2. Get Pods for this deployment
+        label_selector = deployment.spec.selector.match_labels
+        if not label_selector:
+            return json.dumps({"deployment_status": deployment_status, "pods": [], "events": []})
+        
+        selector_str = ",".join([f"{k}={v}" for k, v in label_selector.items()])
+        pod_list = k8s_core_v1.list_namespaced_pod(namespace=namespace, label_selector=selector_str)
+        
+        pods = []
+        for pod in pod_list.items:
+            pods.append({
+                "name": pod.metadata.name,
+                "status": pod.status.phase,
+                "ip": pod.status.pod_ip,
+                "age_seconds": (datetime.utcnow().replace(tzinfo=None) - pod.metadata.creation_timestamp.replace(tzinfo=None)).total_seconds(),
+                "restarts": sum(cs.restart_count for cs in pod.status.container_statuses) if pod.status.container_statuses else 0,
+                "conditions": [c.message for c in pod.status.conditions] if pod.status.conditions else []
+            })
+            
+        # 3. Get recent events for the deployment and its pods
+        field_selector_base = f"involvedObject.namespace={namespace}"
+        deployment_uid = deployment.metadata.uid
+        pod_uids = [p.metadata.uid for p in pod_list.items]
+        
+        event_selectors = [f"involvedObject.uid={deployment_uid}"] + [f"involvedObject.uid={uid}" for uid in pod_uids]
+        
+        events = []
+        # Query events for deployment and each pod
+        event_list = k8s_core_v1.list_namespaced_event(
+            namespace=namespace, 
+            field_selector=f"involvedObject.kind=Deployment,involvedObject.name={service_name}"
+        )
+        for event in event_list.items:
+             events.append({
+                "reason": event.reason,
+                "message": event.message,
+                "type": event.type,
+                "timestamp": event.last_timestamp.isoformat() if event.last_timestamp else event.event_time.isoformat()
+            })
+
+        return json.dumps({
+            "deployment_status": deployment_status,
+            "pods": pods,
+            "events": events
+        }, indent=2)
+
+    except client.ApiException as e:
+        logger.error(f"Kubernetes API error while getting deployment status: {e}", exc_info=True)
+        return f"Error: Failed to get status for deployment '{service_name}'. Kubernetes API error: {e.body}"
+    except Exception as e:
+        logger.error(f"Unexpected error while getting deployment status: {e}", exc_info=True)
+        return f"Error: An unexpected error occurred while getting deployment status: {e}"
+
+
+# --- Tool Registration ---
 
 get_service_dependencies_tool = Tool(
     name="get_service_dependencies",
@@ -388,4 +409,10 @@ list_pods_tool = Tool(
     name="list_kubernetes_pods",
     description="Lists all pods in a given Kubernetes namespace, along with their status and age.",
     func=list_kubernetes_pods
+) 
+
+get_deployment_status_tool = Tool(
+    name="get_kubernetes_deployment_status",
+    description="Provides a comprehensive status report for a Kubernetes deployment, including deployment status, pod details, and recent events.",
+    func=get_kubernetes_deployment_status
 ) 

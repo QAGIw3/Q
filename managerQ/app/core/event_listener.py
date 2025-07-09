@@ -3,13 +3,14 @@ import json
 import pulsar
 import structlog
 import asyncio
+import yaml
+from jinja2 import Template
 
 from managerQ.app.core.task_dispatcher import task_dispatcher
 from managerQ.app.core.agent_registry import agent_registry
 from managerQ.app.api.dashboard_ws import manager as dashboard_manager
-from managerQ.app.core.planner import planner, AmbiguousGoalError
 from managerQ.app.core.workflow_manager import workflow_manager
-from managerQ.app.models import Workflow, WorkflowStatus
+from managerQ.app.models import Workflow
 
 logger = structlog.get_logger(__name__)
 
@@ -76,7 +77,7 @@ class EventListener:
             logger.error("Failed to handle event message", error=str(e), exc_info=True)
 
     def handle_anomaly_event(self, event_data: dict):
-        """Handles an error rate anomaly event by creating a new investigation workflow."""
+        """Handles an error rate anomaly event by creating a new investigation workflow from a template."""
         payload = event_data.get("payload", {})
         service_name = payload.get("service_name")
         event_id = event_data.get("event_id")
@@ -85,34 +86,34 @@ class EventListener:
             logger.warning("Anomaly event received without a service_name or event_id", payload=payload)
             return
 
-        logger.info(f"Anomaly detected in '{service_name}'. Creating investigation workflow.", event_id=event_id)
+        logger.info(f"Anomaly detected in '{service_name}'. Creating investigation workflow from template.", event_id=event_id)
         
         # Broadcast the raw anomaly event to any connected dashboards
         asyncio.run(dashboard_manager.broadcast({
             "event_type": "anomaly_detected",
             "data": event_data
         }))
-        
-        prompt = (
-            f"An automated alert has been triggered for the service '{service_name}'. "
-            f"The service is experiencing an anomalous error rate. "
-            f"Payload: {json.dumps(payload, indent=2)}. "
-            "Your goal is to create a workflow to diagnose the root cause and propose a remediation plan."
-        )
 
         try:
-            # Since this listener runs in a sync loop, we must use asyncio.run()
-            workflow = asyncio.run(planner.create_plan(prompt))
-            workflow.event_id = event_id # Associate the event with the workflow
-            workflow_manager.create_workflow(workflow)
-            logger.info(f"Created and saved new investigation workflow '{workflow.workflow_id}' for event '{event_id}'.")
-
-        except AmbiguousGoalError as e:
-            # This should ideally not happen for automated prompts. It indicates the prompt is poorly formulated.
-            logger.error(
-                "Planner found an auto-generated anomaly prompt to be ambiguous.",
-                prompt=prompt,
-                clarifying_question=e.clarifying_question
+            with open("managerQ/app/workflow_templates/root_cause_analysis_workflow.yaml", 'r') as f:
+                template_str = f.read()
+            
+            template = Template(template_str)
+            rendered_yaml = template.render(
+                service_name=service_name,
+                original_event_payload=json.dumps(payload)
             )
+            
+            workflow_data = yaml.safe_load(rendered_yaml)
+            
+            # Create the workflow object
+            workflow = Workflow(**workflow_data)
+            workflow.event_id = event_id # Associate the event with the workflow
+            
+            workflow_manager.create_workflow(workflow)
+            logger.info(f"Created and saved new investigation workflow '{workflow.workflow_id}' from template for event '{event_id}'.")
+
+        except FileNotFoundError:
+            logger.error("Could not find the root cause analysis workflow template.", exc_info=True)
         except Exception as e:
-            logger.error(f"Failed to create investigation workflow for event '{event_id}'", error=str(e), exc_info=True) 
+            logger.error(f"Failed to create investigation workflow from template for event '{event_id}'", error=str(e), exc_info=True) 
