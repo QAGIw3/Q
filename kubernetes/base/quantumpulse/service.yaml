@@ -1,0 +1,17 @@
+# kubernetes/base/quantumpulse/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: quantumpulse-api
+spec:
+  selector:
+    app: quantumpulse-api
+  ports:
+  - name: http
+    protocol: TCP
+    port: 8000
+    targetPort: 8000
+  - name: metrics
+    protocol: TCP
+    port: 9091
+    targetPort: 9091 

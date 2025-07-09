@@ -1,0 +1,37 @@
+# Prometheus Helm chart values
+# See: https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml
+
+server:
+  # This annotation is crucial. It tells our other Prometheus instance (if any)
+  # that this server should be scraped for metrics.
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+  
+  # Define scrape configurations for our services
+  # This uses Kubernetes service discovery to find pods with specific annotations.
+  extraScrapeConfigs: |
+    - job_name: 'q-platform-services'
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      # Find pods with the 'prometheus.io/scrape: true' annotation
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      # Get the port from the 'prometheus.io/port' annotation
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        target_label: __address__
+        regex: (.+)
+        replacement: ${1}
+      # Use the pod name as the instance label
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: instance
+
+# Disable components we don't need for this setup
+alertmanager:
+  enabled: false
+pushgateway:
+  enabled: false 

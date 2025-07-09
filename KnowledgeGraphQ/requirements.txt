@@ -12,5 +12,8 @@ torch
 # For communicating with VectorStoreQ
 httpx
 
+# Observability
+structlog
+
 # Local Shared Libraries (install in editable mode from project root)
 # -e ./shared/q_vectorstore_client

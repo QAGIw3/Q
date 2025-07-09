@@ -1,0 +1,17 @@
+# kubernetes/base/manager-q/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: manager-q
+spec:
+  selector:
+    app: manager-q
+  ports:
+  - name: http
+    protocol: TCP
+    port: 8003
+    targetPort: 8003
+  - name: metrics
+    protocol: TCP
+    port: 9091
+    targetPort: 9091 

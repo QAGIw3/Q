@@ -27,6 +27,8 @@ Jinja2
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-instrumentation-fastapi
+prometheus-client
+structlog
 
 # Local Shared Libraries (install in editable mode from project root)
 # These dependencies are on local packages.

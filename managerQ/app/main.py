@@ -3,13 +3,19 @@ import logging
 from fastapi import FastAPI
 import uvicorn
 import yaml
+import structlog
 
 from managerQ.app.api import tasks
 from managerQ.app.core.agent_registry import AgentRegistry, agent_registry as agent_registry_instance
 from managerQ.app.core.task_dispatcher import TaskDispatcher, task_dispatcher as task_dispatcher_instance
 from managerQ.app.core.result_listener import ResultListener, result_listener as result_listener_instance
+from shared.observability.logging_config import setup_logging
+from shared.observability.metrics import setup_metrics
 
-# --- Configuration ---
+# --- Configuration & Logging ---
+setup_logging()
+logger = structlog.get_logger(__name__)
+
 def load_config():
     with open("managerQ/config/manager.yaml", 'r') as f:
         return yaml.safe_load(f)
@@ -24,10 +30,13 @@ app = FastAPI(
     description="A service to manage and orchestrate autonomous AI agents."
 )
 
+# Setup Prometheus metrics
+setup_metrics(app, app_name=config['service_name'])
+
 @app.on_event("startup")
 def startup_event():
     """Initializes and starts all background services."""
-    logging.info("ManagerQ starting up...")
+    logger.info("ManagerQ starting up...")
     
     # Use global variables to hold the instances
     global agent_registry_instance, task_dispatcher_instance, result_listener_instance
@@ -49,7 +58,7 @@ def startup_event():
 @app.on_event("shutdown")
 def shutdown_event():
     """Stops all background services gracefully."""
-    logging.info("ManagerQ shutting down...")
+    logger.info("ManagerQ shutting down...")
     if agent_registry_instance:
         agent_registry_instance.stop()
     if task_dispatcher_instance:

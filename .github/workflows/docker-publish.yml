@@ -33,9 +33,21 @@ jobs:
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
       - name: Build and push Docker image
+        id: build-and-push
         uses: docker/build-push-action@v4
         with:
           context: .
           file: ${{ inputs.dockerfile_path }}
           push: true
-          tags: ${{ secrets.REGISTRY_URL }}/${{ inputs.service_name }}:${{ github.sha }} 
+          tags: ${{ secrets.REGISTRY_URL }}/${{ inputs.service_name }}:${{ github.sha }}
+
+  update-manifest:
+    needs: build-and-push
+    uses: ./.github/workflows/kustomize-edit.yml
+    with:
+      service_name: ${{ inputs.service_name }}
+      new_image_tag: ${{ github.sha }}
+    secrets:
+      GIT_USER_NAME: ${{ secrets.GIT_USER_NAME }}
+      GIT_USER_EMAIL: ${{ secrets.GIT_USER_EMAIL }}
+      GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }} 

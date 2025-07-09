@@ -39,6 +39,26 @@ resource "helm_repository" "goharbor" {
   url  = "https://helm.goharbor.io"
 }
 
+resource "helm_repository" "prometheus_community" {
+  name = "prometheus-community"
+  url  = "https://prometheus-community.github.io/helm-charts"
+}
+
+resource "helm_repository" "grafana" {
+  name = "grafana"
+  url  = "https://grafana.github.io/helm-charts"
+}
+
+resource "helm_repository" "argo" {
+  name = "argo"
+  url  = "https://argoproj.github.io/argo-helm"
+}
+
+resource "helm_repository" "hashicorp" {
+  name = "hashicorp"
+  url  = "https://helm.releases.hashicorp.com"
+}
+
 # --- Helm Releases for Core Infrastructure ---
 
 resource "helm_release" "keycloak" {
@@ -75,5 +95,62 @@ resource "helm_release" "harbor" {
 
   values = [
     file("${path.module}/values/harbor.yaml")
+  ]
+}
+
+# --- Helm Releases for Observability ---
+
+resource "helm_release" "prometheus" {
+  name       = "prometheus"
+  repository = helm_repository.prometheus_community.name
+  chart      = "prometheus"
+  version    = "25.4.0" # Pinning version for stability
+  namespace  = "q-platform"
+
+  values = [
+    file("${path.module}/values/prometheus.yaml")
+  ]
+}
+
+resource "helm_release" "grafana" {
+  name       = "grafana"
+  repository = helm_repository.grafana.name
+  chart      = "grafana"
+  version    = "7.3.5" # Pinning version for stability
+  namespace  = "q-platform"
+
+  values = [
+    file("${path.module}/values/grafana.yaml")
+  ]
+  depends_on = [helm_release.prometheus]
+}
+
+# --- Helm Releases for GitOps ---
+
+resource "helm_release" "argocd" {
+  name       = "argo-cd"
+  repository = helm_repository.argo.name
+  chart      = "argo-cd"
+  version    = "5.51.5" # Pinning version for stability
+  namespace  = "argocd"
+  create_namespace = true
+
+  values = [
+    file("${path.module}/values/argocd.yaml")
+  ]
+}
+
+# --- Helm Releases for Security ---
+
+resource "helm_release" "vault" {
+  name       = "vault"
+  repository = helm_repository.hashicorp.name
+  chart      = "vault"
+  version    = "0.27.0" # Pinning version for stability
+  namespace  = "vault"
+  create_namespace = true
+
+  values = [
+    file("${path.module}/values/vault.yaml")
   ]
 } 

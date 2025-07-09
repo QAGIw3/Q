@@ -5,3 +5,13 @@ python-multipart
 jinja2
 zulip
 pulsar-client 
+# For connecting to external services
+httpx
+zulip_bots
+
+# Utilities
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi
+prometheus-client
+structlog 

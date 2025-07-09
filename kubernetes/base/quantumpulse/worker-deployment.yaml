@@ -1,0 +1,34 @@
+# kubernetes/base/quantumpulse/worker-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quantumpulse-worker-model-a-shard-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quantumpulse-worker-model-a-shard-1
+  template:
+    metadata:
+      labels:
+        app: quantumpulse-worker-model-a-shard-1
+    spec:
+      containers:
+      - name: quantumpulse-worker
+        image: your-registry/quantumpulse-worker:latest
+        command:
+        - "python"
+        - "app/workers/specific_model_worker.py"
+        - "--model-name"
+        - "model-a"
+        - "--shard-id"
+        - "shard-1"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "2Gi"
+            # nvidia.com/gpu: "1" # Uncomment if using GPUs
+          limits:
+            cpu: "1"
+            memory: "4Gi"
+            # nvidia.com/gpu: "1" 

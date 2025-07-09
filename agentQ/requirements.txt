@@ -7,6 +7,10 @@ PyYAML==6.0.1
 pyignite==0.5.0
 httpx
 
+# Observability
+structlog
+hvac
+
 # OpenTelemetry
 opentelemetry-api==1.24.0
 opentelemetry-sdk==1.24.0

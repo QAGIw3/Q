@@ -1,0 +1,45 @@
+# kubernetes/base/h2m-service/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: h2m-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: h2m-service
+  template:
+    metadata:
+      labels:
+        app: h2m-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091" # The port for the metrics server
+    spec:
+      containers:
+      - name: h2m-service
+        image: your-registry/h2m-service:latest
+        ports:
+        - containerPort: 8002
+        env:
+        - name: METRICS_PORT
+          value: "9091"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8002
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi" 

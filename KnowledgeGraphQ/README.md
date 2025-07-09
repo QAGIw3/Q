@@ -52,4 +52,4 @@ export PYTHONPATH=$(pwd)
 python KnowledgeGraphQ/scripts/ingest_docs.py
 ```
 
-The script will log its progress as it creates the collection, chunks the documents, generates embeddings, and ingests the data into the vector store.
+The script will log its progress in a structured JSON format.

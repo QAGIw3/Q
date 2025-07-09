@@ -1,0 +1,41 @@
+# kubernetes/base/webapp-q/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp-q
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp-q
+  template:
+    metadata:
+      labels:
+        app: webapp-q
+    spec:
+      containers:
+      - name: webapp-q
+        image: your-registry/webapp-q:latest # This will be replaced by Kustomize
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "250m"
+            memory: "256Mi"
+
+---
+# kubernetes/base/webapp-q/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-q
+spec:
+  selector:
+    app: webapp-q
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80 

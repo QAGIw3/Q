@@ -1,0 +1,12 @@
+# kubernetes/base/webapp-q/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-q
+spec:
+  selector:
+    app: webapp-q
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80 

@@ -12,11 +12,16 @@ import fastavro
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
+import structlog
+
+from shared.observability.logging_config import setup_logging
+from shared.observability.metrics import setup_metrics
 
 # --- Configuration & Setup ---
-logging.basicConfig(level="INFO", format='%(asctime)s - %(threadName)s - %(message)s')
-logger = logging.getLogger("agentsandbox")
+setup_logging()
+logger = structlog.get_logger("agentsandbox")
 app = FastAPI(title="Agent Sandbox", version="0.1.0")
+setup_metrics(app, app_name="AgentSandbox")
 
 # In-memory storage for simulation results (for MVP)
 simulations: Dict[str, Dict[str, Any]] = {}
@@ -24,7 +29,9 @@ simulations: Dict[str, Dict[str, Any]] = {}
 # --- Pulsar Listener ---
 # This will run in a separate thread for each simulation
 def result_listener_thread(sim_id: str, stop_event: threading.Event):
-    logger.info(f"[{sim_id}] Starting result listener thread.")
+    # Create a logger for this specific thread/simulation
+    thread_logger = logger.bind(simulation_id=sim_id)
+    thread_logger.info("Starting result listener thread.")
     simulations[sim_id]["results"] = {}
     
     RESULTS_TOPIC = "q.agentq.results"
@@ -65,21 +72,22 @@ def result_listener_thread(sim_id: str, stop_event: threading.Event):
                             else:
                                 simulations[sim_id]["steps"][prompt_id]["validation"] = "FAILED"
 
-                        logger.info(f"[{sim_id}] Received result for prompt ID: {prompt_id}")
+                        thread_logger.info("Received result", prompt_id=prompt_id)
                 consumer.acknowledge(msg)
             except pulsar.Timeout:
                 continue
     except Exception as e:
-        logger.error(f"[{sim_id}] Error in result listener: {e}")
+        thread_logger.error("Error in result listener", error=str(e))
     finally:
         if client:
             client.close()
-        logger.info(f"[{sim_id}] Result listener thread stopped.")
+        thread_logger.info("Result listener thread stopped.")
 
 
 # --- Simulation Runner ---
 def run_scenario(sim_id: str, scenario: Dict[str, Any]):
-    logger.info(f"[{sim_id}] Starting scenario: {scenario['name']}")
+    thread_logger = logger.bind(simulation_id=sim_id)
+    thread_logger.info("Starting scenario", scenario_name=scenario['name'])
     simulations[sim_id]["status"] = "RUNNING"
     h2m_endpoint = scenario["h2m_endpoint"]
     
@@ -97,7 +105,7 @@ def run_scenario(sim_id: str, scenario: Dict[str, Any]):
                     "expected_keyword": step.get("expected_keyword")
                 }
                 
-                logger.info(f"[{sim_id}] Sending intent: '{intent}'")
+                thread_logger.info("Sending intent", intent=intent)
                 http_client.post(h2m_endpoint, json={"intent": intent})
                 time.sleep(1) # Small delay between requests
         
@@ -105,13 +113,13 @@ def run_scenario(sim_id: str, scenario: Dict[str, Any]):
         time.sleep(30) # Give 30 seconds for all results to arrive
         
     except Exception as e:
-        logger.error(f"[{sim_id}] Error running scenario: {e}")
+        thread_logger.error("Error running scenario", error=str(e))
         simulations[sim_id]["status"] = "FAILED"
     finally:
         simulations[sim_id]["stop_event"].set()
         if simulations[sim_id]["status"] != "FAILED":
             simulations[sim_id]["status"] = "COMPLETED"
-        logger.info(f"[{sim_id}] Scenario finished.")
+        thread_logger.info("Scenario finished.")
 
 
 # --- API Endpoints ---

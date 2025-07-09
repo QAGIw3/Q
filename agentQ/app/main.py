@@ -14,20 +14,25 @@ import signal
 import uuid
 import json
 from opentelemetry import trace
+import structlog
 
 from shared.opentelemetry.tracing import setup_tracing
+from shared.observability.logging_config import setup_logging
+from shared.vault_client import VaultClient
 from agentQ.app.core.context import ContextManager
 from agentQ.app.core.toolbox import Toolbox, Tool
 from agentQ.app.core.vectorstore_tool import vectorstore_tool
+from agentQ.app.core.human_tool import human_tool
+from agentQ.app.core.integrationhub_tool import integrationhub_tool
 
-# Initialize tracing
-SERVICE_NAME = "agentq-service"
-setup_tracing(app=None) # Pass None as we are not in a FastAPI context
-tracer = trace.get_tracer(__name__)
+# Initialize tracing and logging
+setup_tracing(app=None)
+setup_logging()
+logger = structlog.get_logger("agentq")
 
 # --- Configuration & Logging ---
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("agentq")
+# logging.basicConfig(level=logging.INFO) # This line is removed as per the new_code
+# logger = logging.getLogger("agentq") # This line is removed as per the new_code
 running = True
 
 # --- System Prompt ---
@@ -36,12 +41,16 @@ You are an autonomous AI agent. Your goal is to answer the user's question or fu
 
 You operate in a ReAct (Reason, Act) loop. In each turn, you must use the following format:
 
-Thought: [Your reasoning about the current state and what to do next]
-Action: [A JSON object describing the action to take. Must be one of `finish` or `call_tool`]
+Thought: [Your step-by-step reasoning about the current state, what you have learned, and what you need to do next. Be very detailed.]
+Action: [A single JSON object describing the action to take. Must be one of `finish` or `call_tool`]
+
+The `action` value MUST be a JSON object.
 
 Example `Action` objects:
 - To provide a final answer: `{"action": "finish", "answer": "The final answer to the user."}`
-- To call a tool: `{"action": "call_tool", "tool_name": "tool_name", "parameters": {"arg1": "value1"}}`
+- To call a tool: `{"action": "call_tool", "tool_name": "name_of_tool", "parameters": {"arg1": "value1", "arg2": "value2"}}`
+
+You can call tools sequentially to gather information. After each tool call, you will receive an "Observation" with the result. Use these observations to inform your next thought and action. Continue until you have enough information to provide a final answer.
 
 Here are the tools you have available:
 {tools}
@@ -77,7 +86,7 @@ def load_config():
 
 def register_with_manager(producer, agent_id, task_topic):
     """Sends a registration message to the manager."""
-    logger.info(f"Registering agent '{agent_id}' with topic '{task_topic}'")
+    logger.info("Registering agent", agent_id=agent_id, topic=task_topic)
     message = {"agent_id": agent_id, "task_topic": task_topic}
     buf = io.BytesIO()
     fastavro.writer(buf, REGISTRATION_SCHEMA, [message])
@@ -117,7 +126,7 @@ def react_loop(prompt_data, context_manager, toolbox, client, llm_config):
             action_json = json.loads(action_str)
             current_span.add_event("LLM Response Parsed", {"thought": thought, "action": json.dumps(action_json)})
         except (IndexError, json.JSONDecodeError) as e:
-            logger.error(f"Could not parse LLM response: {response_text}. Error: {e}")
+            logger.error("Could not parse LLM response", response=response_text, error=str(e))
             return "Error: Could not parse my own action. I will try again."
 
         # 4. Execute the action
@@ -128,6 +137,7 @@ def react_loop(prompt_data, context_manager, toolbox, client, llm_config):
         elif action_json.get("action") == "call_tool":
             tool_name = action_json.get("tool_name")
             parameters = action_json.get("parameters", {})
+            logger.info("Executing tool", tool_name=tool_name, parameters=parameters)
             observation = toolbox.execute_tool(tool_name, **parameters)
             history.append({"role": "system", "content": f"Tool Observation: {observation}"})
         else:
@@ -149,11 +159,17 @@ def run_agent():
     context_manager = ContextManager(ignite_addresses=config['ignite']['addresses'], agent_id=agent_id)
     toolbox = Toolbox()
     toolbox.register_tool(vectorstore_tool)
+    toolbox.register_tool(human_tool)
+    toolbox.register_tool(integrationhub_tool)
     
     pulsar_client = None
     try:
+        # Fetch secrets from Vault instead of environment variables
+        vault_client = VaultClient()
+        openai_api_key = vault_client.read_secret("secret/data/openai", "api_key")
+
         pulsar_client = pulsar.Client(pulsar_config['service_url'])
-        openai_client = OpenAI()
+        openai_client = OpenAI(api_key=openai_api_key)
         context_manager.connect()
 
         # Producer for registration
@@ -171,15 +187,18 @@ def run_agent():
         with tracer.start_as_current_span("agent_main_loop") as parent_span:
             parent_span.set_attribute("agent.id", agent_id)
             parent_span.set_attribute("agent.task_topic", task_topic)
-            logger.info(f"Agent '{agent_id}' is running. Listening on '{task_topic}'.")
+            logger.info("Agent running", agent_id=agent_id, topic=task_topic)
 
             while running:
                 try:
                     msg = consumer.receive(timeout_millis=1000)
                     bytes_reader = io.BytesIO(msg.data())
                     prompt_data = next(fastavro.reader(bytes_reader, PROMPT_SCHEMA), None)
-                    if not prompt_data: continue
+                    if not prompt_data:
+                        consumer.acknowledge(msg)
+                        continue
 
+                    logger.info("Received task", task_id=prompt_data.get("id"))
                     final_result = react_loop(prompt_data, context_manager, toolbox, openai_client, llm_config)
                     
                     # Publish the final result
@@ -191,23 +210,24 @@ def run_agent():
                     buf = io.BytesIO()
                     fastavro.writer(buf, RESULT_SCHEMA, [result_message])
                     result_producer.send(buf.getvalue())
+                    logger.info("Published result", task_id=prompt_data.get("id"))
 
                     consumer.acknowledge(msg)
                 except pulsar.Timeout:
                     continue
                 except Exception as e:
-                    logger.error(f"An error occurred in the main loop: {e}", exc_info=True)
+                    logger.error("An error occurred in the main loop", error=str(e), exc_info=True)
                     if 'msg' in locals():
                         consumer.negative_acknowledge(msg)
                     time.sleep(5)
 
     except Exception as e:
-        logger.error(f"A critical error occurred: {e}", exc_info=True)
+        logger.critical("A critical error occurred, agent shutting down", error=str(e), exc_info=True)
     finally:
         if pulsar_client:
             pulsar_client.close()
         context_manager.close()
-        logger.info(f"Agent '{agent_id}' has shut down.")
+        logger.info("Agent has shut down", agent_id=agent_id)
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, shutdown)

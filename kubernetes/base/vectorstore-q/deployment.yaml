@@ -1,0 +1,45 @@
+# kubernetes/base/vectorstore-q/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vectorstore-q
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vectorstore-q
+  template:
+    metadata:
+      labels:
+        app: vectorstore-q
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+    spec:
+      containers:
+      - name: vectorstore-q
+        image: your-registry/vectorstore-q:latest
+        ports:
+        - containerPort: 8001
+        env:
+        - name: METRICS_PORT
+          value: "9091"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi" 

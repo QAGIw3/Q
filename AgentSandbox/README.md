@@ -31,6 +31,11 @@ The Agent Simulation & Sandbox Environment is a safe, isolated platform for simu
 
 See `/docs` for scripting reference, metrics schema, and advanced simulation features.
 
+## Observability
+
+-   **Structured Logging**: The service and its background threads use `structlog` to emit JSON-formatted logs. Logs from scenario runs are tagged with a unique `simulation_id` for easy correlation.
+-   **Metrics**: The main API server exposes a `/metrics` endpoint for Prometheus to scrape.
+
 ## Contributing
 
 Suggestions for new scenario modules, monitoring plugins, and UI tools are welcome! See `CONTRIBUTING.md`.

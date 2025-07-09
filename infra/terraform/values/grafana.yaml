@@ -1,0 +1,28 @@
+# Grafana Helm chart values
+# See: https://github.com/grafana/helm-charts/blob/main/charts/grafana/values.yaml
+
+# Administrator credentials
+# IMPORTANT: For production, use a more secure password or a secret.
+adminPassword: "Password123"
+
+# Expose Grafana via a LoadBalancer
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 3000
+
+# Configure the Prometheus instance as a pre-defined datasource
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      # The URL points to the Prometheus server service within the same k8s cluster
+      url: http://prometheus-server.q-platform.svc.cluster.local
+      access: proxy
+      isDefault: true
+      
+persistence:
+  enabled: true
+  size: 10Gi 

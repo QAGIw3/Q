@@ -1,0 +1,45 @@
+# kubernetes/base/manager-q/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: manager-q
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: manager-q
+  template:
+    metadata:
+      labels:
+        app: manager-q
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+    spec:
+      containers:
+      - name: manager-q
+        image: your-registry/manager-q:latest
+        ports:
+        - containerPort: 8003
+        env:
+        - name: METRICS_PORT
+          value: "9091"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8003
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8003
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi" 

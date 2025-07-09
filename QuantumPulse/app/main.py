@@ -1,23 +1,29 @@
 from fastapi import FastAPI
 import uvicorn
 import logging
+import structlog
 
 from app.api.endpoints import inference
 from app.core.pulsar_client import PulsarManager
 from app.core import pulsar_client as pulsar_manager_module
 from app.core.config import config
 from shared.opentelemetry.tracing import setup_tracing
+from shared.observability.logging_config import setup_logging
+from shared.observability.metrics import setup_metrics
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# --- Logging and Metrics Setup ---
+setup_logging()
+logger = structlog.get_logger(__name__)
 
-# Create the FastAPI app instance
+# --- FastAPI App ---
 app = FastAPI(
     title=config.service_name,
     version=config.version,
     description="A next-generation service for distributed LLM inference pipelines."
 )
+
+# Setup Prometheus metrics
+setup_metrics(app, app_name=config.service_name)
 
 # Setup OpenTelemetry
 setup_tracing(app)

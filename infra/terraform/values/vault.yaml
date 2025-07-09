@@ -1,0 +1,23 @@
+# HashiCorp Vault Helm chart values
+# See: https://github.com/hashicorp/vault-helm/blob/main/values.yaml
+
+# Run Vault in a lightweight, non-HA development mode
+# This is NOT suitable for production but is perfect for our use case.
+global:
+  enabled: true
+  tlsDisable: true
+
+server:
+  dev:
+    enabled: true
+  
+  # Expose the Vault UI via a LoadBalancer service
+  service:
+    type: "LoadBalancer"
+
+# Disable components not needed for our dev setup
+csi:
+  enabled: false
+
+injector:
+  enabled: false # We will enable this later via Terraform for more control 

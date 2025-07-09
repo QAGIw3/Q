@@ -4,6 +4,7 @@ import os
 import httpx
 import asyncio
 import logging
+import structlog
 from langchain.document_loaders import DirectoryLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
@@ -14,9 +15,11 @@ import uuid
 from shared.q_vectorstore_client.client import VectorStoreClient
 from shared.q_vectorstore_client.models import Vector
 
-# --- Configuration ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# --- Configuration & Logging ---
+from shared.observability.logging_config import setup_logging
+
+setup_logging()
+logger = structlog.get_logger(__name__)
 
 VECTORSTORE_URL = "http://localhost:8001"
 DATA_DIR = "KnowledgeGraphQ/data"
@@ -46,7 +49,7 @@ RAG_COLLECTION_SCHEMA = {
 
 async def create_collection_if_not_exists():
     """Calls the VectorStoreQ API to create the collection."""
-    logger.info(f"Attempting to create collection '{COLLECTION_NAME}'...")
+    logger.info("Attempting to create collection", collection_name=COLLECTION_NAME)
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -55,20 +58,20 @@ async def create_collection_if_not_exists():
                 timeout=30.0
             )
             response.raise_for_status()
-            logger.info(f"Create collection response: {response.json()}")
+            logger.info("Create collection response", response=response.json())
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404: # Not found, which is unexpected here
-             logger.error("Management endpoint not found. Is VectorStoreQ running?")
+             logger.error("Management endpoint not found", service_url=VECTORSTORE_URL)
         else:
-            logger.error(f"Error creating collection: {e.response.status_code} - {e.response.text}")
+            logger.error("Error creating collection", status=e.response.status_code, text=e.response.text)
         raise
     except httpx.RequestError as e:
-        logger.error(f"Could not connect to VectorStoreQ at {VECTORSTORE_URL}. Please ensure it is running.")
+        logger.error("Could not connect to VectorStoreQ", service_url=VECTORSTORE_URL, error=str(e))
         raise
 
 def load_and_chunk_documents():
     """Loads documents from the data directory and splits them into chunks."""
-    logger.info(f"Loading documents from '{DATA_DIR}'...")
+    logger.info("Loading documents", data_dir=DATA_DIR)
     loader = DirectoryLoader(DATA_DIR, glob="**/*.md", loader_cls=TextLoader)
     documents = loader.load()
 
@@ -78,7 +81,7 @@ def load_and_chunk_documents():
         length_function=len,
     )
     chunks = text_splitter.split_documents(documents)
-    logger.info(f"Loaded and split {len(documents)} documents into {len(chunks)} chunks.")
+    logger.info("Finished document processing", doc_count=len(documents), chunk_count=len(chunks))
     return chunks
 
 def generate_embeddings(chunks, model):
@@ -86,7 +89,7 @@ def generate_embeddings(chunks, model):
     logger.info("Generating embeddings for all chunks...")
     sentences = [chunk.page_content for chunk in chunks]
     embeddings = model.encode(sentences, show_progress_bar=True)
-    logger.info("Embedding generation complete.")
+    logger.info("Embedding generation complete")
     return embeddings
 
 async def ingest_data():
@@ -97,11 +100,11 @@ async def ingest_data():
     # 2. Load and chunk documents
     chunks = load_and_chunk_documents()
     if not chunks:
-        logger.info("No documents to ingest.")
+        logger.warn("No documents to ingest. Exiting.")
         return
 
     # 3. Initialize models
-    logger.info(f"Loading sentence transformer model: {EMBEDDING_MODEL}")
+    logger.info("Loading sentence transformer model", model_name=EMBEDDING_MODEL)
     embedding_model = SentenceTransformer(EMBEDDING_MODEL)
     vs_client = VectorStoreClient(base_url=VECTORSTORE_URL)
 
@@ -123,12 +126,12 @@ async def ingest_data():
         )
         vectors_to_upsert.append(vector)
 
-    logger.info(f"Upserting {len(vectors_to_upsert)} vectors to VectorStoreQ...")
+    logger.info("Upserting vectors to VectorStoreQ", vector_count=len(vectors_to_upsert))
     try:
         await vs_client.upsert(collection_name=COLLECTION_NAME, vectors=vectors_to_upsert)
-        logger.info("Ingestion process completed successfully.")
+        logger.info("Ingestion process completed successfully")
     except Exception as e:
-        logger.error(f"Failed to upsert data: {e}", exc_info=True)
+        logger.error("Failed to upsert data", error=str(e), exc_info=True)
     finally:
         await vs_client.close()
 

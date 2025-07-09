@@ -1,16 +1,18 @@
-# infra/terraform/values/argocd.yaml
-#
-# Minimal values for a local/dev ArgoCD setup.
-# Full values list: https://github.com/argoproj/argo-helm/blob/main/charts/argo-cd/values.yaml
+# ArgoCD Helm chart values
+# See: https://github.com/argoproj/argo-helm/blob/main/charts/argo-cd/values.yaml
 
+# Expose the ArgoCD server via a LoadBalancer for easy UI access
 server:
-  # For local dev, we'll use a ClusterIP and port-forward.
-  # For production, you would configure Ingress.
   service:
-    type: ClusterIP
+    type: LoadBalancer
 
-  # Disable TLS for local dev. Production should use TLS.
-  insecure: true
+# Enable persistence for ArgoCD data
+persistence:
+  enabled: true
+  size: 10Gi
+
+# Disable TLS for local dev. Production should use TLS.
+insecure: true
 
 # Use a smaller, non-HA Redis for local dev
 redis:

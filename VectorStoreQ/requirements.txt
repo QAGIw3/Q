@@ -20,4 +20,6 @@ pyyaml
 # Utilities
 opentelemetry-api
 opentelemetry-sdk
-opentelemetry-instrumentation-fastapi 
+opentelemetry-instrumentation-fastapi
+prometheus-client
+structlog 

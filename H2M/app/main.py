@@ -6,27 +6,27 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from fastapi import FastAPI
 import uvicorn
 import logging
+import structlog
 
 from app.api import chat
 from app.core.config import config
 from app.services.ignite_client import ignite_client
-# Assuming a shared tracing setup might exist, similar to other services
-# from shared.opentelemetry.tracing import setup_tracing
+from shared.observability.logging_config import setup_logging
+from shared.observability.metrics import setup_metrics
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# --- Logging and Metrics Setup ---
+setup_logging()
+logger = structlog.get_logger(__name__)
 
-# Create the FastAPI app instance
+# --- FastAPI App ---
 app = FastAPI(
     title=config.service_name,
     version=config.version,
     description="Human-to-Machine (H2M) service for conversational AI orchestration."
 )
 
-# Setup OpenTelemetry if enabled
-# if config.otel.enabled:
-#     setup_tracing(app)
+# Setup Prometheus metrics
+setup_metrics(app, app_name=config.service_name)
 
 @app.on_event("startup")
 async def startup_event():

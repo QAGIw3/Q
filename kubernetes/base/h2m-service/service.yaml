@@ -1,0 +1,17 @@
+# kubernetes/base/h2m-service/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: h2m-service
+spec:
+  selector:
+    app: h2m-service
+  ports:
+  - name: http
+    protocol: TCP
+    port: 8002
+    targetPort: 8002
+  - name: metrics
+    protocol: TCP
+    port: 9091
+    targetPort: 9091 

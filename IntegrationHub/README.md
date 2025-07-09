@@ -39,3 +39,8 @@ pip install -r IntegrationHub/requirements.txt
 export PYTHONPATH=$(pwd)
 uvicorn IntegrationHub.app.main:app --reload
 ```
+
+## Observability
+
+-   **Structured Logging**: The service uses `structlog` to emit JSON-formatted logs for easy parsing and analysis.
+-   **Metrics**: Exposes a `/metrics` endpoint for Prometheus to scrape. It tracks standard metrics like request latency and counts.
